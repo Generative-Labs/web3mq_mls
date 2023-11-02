@@ -1,7 +1,8 @@
 // public
-mod file_helpers;
 pub mod persistent_crypto;
 
+// private
+mod file_helpers;
 mod persistent_key_store;
 
 #[cfg(test)]
