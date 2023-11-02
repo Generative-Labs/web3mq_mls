@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use openmls::prelude::{config::CryptoConfig, *};
 use openmls_basic_credential::SignatureKeyPair;
-use openmls_traits::OpenMlsProvider;
 
-use super::{openmls_rust_persistent_crypto::OpenMlsRustPersistentCrypto, serialize_any_hashmap};
+use crate::storage::persistent_crypto::OpenMlsRustPersistentCrypto;
+
+use super::serialize_any_hashmap;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Identity {

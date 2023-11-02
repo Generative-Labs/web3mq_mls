@@ -1,8 +1,6 @@
 // public
 pub mod persistent_crypto;
 
-// private
-mod file_helpers;
 mod persistent_key_store;
 
 #[cfg(test)]
@@ -14,7 +12,7 @@ mod crypto_store_tests {
     use openmls_traits::{
         key_store::OpenMlsKeyStore,
         types::{Ciphersuite, SignatureScheme},
-        OpenMlsCryptoProvider,
+        OpenMlsProvider,
     };
 
     use openmls_basic_credential::SignatureKeyPair;
@@ -66,7 +64,7 @@ mod crypto_store_tests {
         identity: Vec<u8>,
         credential_type: CredentialType,
         signature_algorithm: SignatureScheme,
-        backend: &impl OpenMlsCryptoProvider,
+        backend: &impl OpenMlsProvider,
     ) -> (CredentialWithKey, SignatureKeyPair) {
         let credential = Credential::new(identity, credential_type).unwrap();
         let signature_keys = SignatureKeyPair::new(signature_algorithm)
@@ -89,7 +87,7 @@ mod crypto_store_tests {
     // A helper to create key package bundles.
     fn generate_key_package(
         ciphersuite: Ciphersuite,
-        backend: &impl OpenMlsCryptoProvider,
+        backend: &impl OpenMlsProvider,
         signer: &SignatureKeyPair,
         credential_with_key: CredentialWithKey,
     ) -> KeyPackage {

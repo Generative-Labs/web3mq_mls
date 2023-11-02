@@ -1,6 +1,6 @@
 use super::persistent_key_store::PersistentKeyStore;
 use openmls_rust_crypto::RustCrypto;
-use openmls_traits::OpenMlsCryptoProvider;
+use openmls_traits::OpenMlsProvider;
 
 #[derive(Default, Debug)]
 pub struct OpenMlsRustPersistentCrypto {
@@ -8,7 +8,7 @@ pub struct OpenMlsRustPersistentCrypto {
     key_store: PersistentKeyStore,
 }
 
-impl OpenMlsCryptoProvider for OpenMlsRustPersistentCrypto {
+impl OpenMlsProvider for OpenMlsRustPersistentCrypto {
     type CryptoProvider = RustCrypto;
     type RandProvider = RustCrypto;
     type KeyStoreProvider = PersistentKeyStore;
