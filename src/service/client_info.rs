@@ -18,15 +18,15 @@ pub struct ClientInfo {
 }
 
 #[derive(
-Debug,
-Default,
-Clone,
-PartialEq,
-TlsSerialize,
-TlsDeserialize,
-TlsSize,
-serde::Serialize,
-serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    TlsSerialize,
+    TlsDeserialize,
+    TlsSize,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub struct ClientKeyPackages(pub TlsVecU32<(TlsByteVecU8, KeyPackageIn)>);
 
