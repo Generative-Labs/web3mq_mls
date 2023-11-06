@@ -1,6 +1,8 @@
 // public
 pub mod persistent_crypto;
 
+// pub mod rusqlite;
+
 mod persistent_key_store;
 
 #[cfg(test)]

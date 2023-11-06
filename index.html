@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en-US">
+
+<head>
+    <meta charset="utf-8" />
+    <title>hello-wasm example</title>
+</head>
+
+<body>
+    <script type="module">
+        import init, { User } from "./pkg/web3mq_mls.js";
+        init().then(() => {
+            console.log("init success");
+            let user = User.new("Alice");
+            console.log(user);
+        });
+    </script>
+</body>
+
+</html>

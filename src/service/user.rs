@@ -7,6 +7,7 @@ use std::{cell::RefCell, collections::HashMap, str};
 
 use openmls::prelude::*;
 use tls_codec::TlsByteVecU8;
+use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::file_helpers;
 use crate::service::backend::Backend;
@@ -32,6 +33,7 @@ pub struct Group {
     mls_group: RefCell<MlsGroup>,
 }
 
+#[wasm_bindgen]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct User {
     pub(crate) user_id: String,
@@ -57,11 +59,13 @@ pub enum PostUpdateActions {
     Remove,
 }
 
+#[wasm_bindgen]
 impl User {
     /// Create a new user with the given name and a fresh set of credentials.
-    pub fn new(user_id: String) -> Self {
+    #[wasm_bindgen]
+    pub fn new(user_id: String) -> User {
         let crypto = OpenMlsRustPersistentCrypto::default();
-        let out = Self {
+        let out = User {
             user_id: user_id.clone(),
             groups: RefCell::new(HashMap::new()),
             group_list: HashSet::new(),
@@ -89,7 +93,7 @@ impl User {
         }
     }
 
-    pub fn load(user_id: String) -> Result<Self, String> {
+    pub fn load(user_id: String) -> Result<User, String> {
         let input_path = User::get_file_path(&user_id);
 
         match File::open(input_path) {
@@ -173,7 +177,7 @@ impl User {
 
     /// Add a key package to the user identity and return the pair [key package
     /// hash ref , key package]
-    pub fn add_key_package(&self) -> (Vec<u8>, KeyPackage) {
+    fn add_key_package(&self) -> (Vec<u8>, KeyPackage) {
         let kp = self
             .identity
             .borrow_mut()
@@ -211,8 +215,8 @@ impl User {
         Vec::from_iter(kpgs)
     }
 
-    pub fn register(&self) {
-        match self.backend.register_client(self) {
+    pub async fn register(&self) {
+        match self.backend.register_client(self).await {
             Ok(r) => log::debug!("Created new user: {:?}", r),
             Err(e) => log::error!("Error creating user: {:?}", e),
         }
@@ -269,7 +273,7 @@ impl User {
     }
 
     /// Create a new key package and publish it to the delivery server
-    pub fn create_kp(&self) {
+    pub async fn create_kp(&self) {
         let kp = self.add_key_package();
         let ckp = ClientKeyPackages(
             vec![kp]
@@ -279,14 +283,14 @@ impl User {
                 .into(),
         );
 
-        match self.backend.publish_key_packages(self, &ckp) {
+        match self.backend.publish_key_packages(self, &ckp).await {
             Ok(()) => (),
             Err(e) => println!("Error sending new key package: {e:?}"),
         };
     }
 
     /// Send an application message to the group.
-    pub fn send_msg(&self, msg: &str, group: String) -> Result<(), String> {
+    pub async fn send_msg(&self, msg: &str, group: String) -> Result<(), String> {
         let groups = self.groups.borrow();
         let group = match groups.get(&group) {
             Some(g) => g,
@@ -301,7 +305,7 @@ impl User {
 
         let msg = GroupMessage::new(message_out.into(), &self.recipients(group));
         log::debug!(" >>> send: {:?}", msg);
-        match self.backend.send_msg(&msg) {
+        match self.backend.send_msg(&msg).await {
             Ok(()) => (),
             Err(e) => println!("Error sending group message: {e:?}"),
         }
@@ -314,8 +318,8 @@ impl User {
 
     /// Update the user clients list.
     /// It updates the contacts with all the clients known by the server
-    fn update_clients(&mut self) {
-        match self.backend.list_clients() {
+    async fn update_clients(&mut self) {
+        match self.backend.list_clients().await {
             Ok(mut v) => {
                 for c in v.drain(..) {
                     let client_id = c.id.clone();
@@ -357,7 +361,7 @@ impl User {
     /// Update the user. This involves:
     /// * retrieving all new messages from the server
     /// * update the contacts with all other clients known to the server
-    pub fn update(
+    pub async fn update(
         &mut self,
         group_name: Option<String>,
     ) -> Result<Vec<ConversationMessage>, String> {
@@ -471,7 +475,7 @@ impl User {
 
         log::debug!("update::Processing messages for {} ", self.user_id);
         // Go through the list of messages and process or store them.
-        for message in self.backend.recv_msgs(self)?.drain(..) {
+        for message in self.backend.recv_msgs(self).await?.drain(..) {
             log::debug!("Reading message format {:#?} ...", message.wire_format());
             match message.extract() {
                 MlsMessageInBody::Welcome(welcome) => {
@@ -511,7 +515,7 @@ impl User {
         }
         log::debug!("update::Processing messages done");
 
-        self.update_clients();
+        self.update_clients().await;
 
         self.autosave();
 
@@ -557,7 +561,7 @@ impl User {
     }
 
     /// Invite user with the given name to the group.
-    pub fn invite(&mut self, name: String, group_name: String) -> Result<(), String> {
+    pub async fn invite(&mut self, name: String, group_name: String) -> Result<(), String> {
         // First we need to get the key package for {id} from the DS.
         let contact = match self.contacts.values().find(|c| c.username == name) {
             Some(v) => v,
@@ -565,7 +569,7 @@ impl User {
         };
 
         // Reclaim a key package from the server
-        let joiner_key_package = self.backend.consume_key_package(&contact.id).unwrap();
+        let joiner_key_package = self.backend.consume_key_package(&contact.id).await.unwrap();
 
         // Build a proposal with this key package and do the MLS bits.
         let mut groups = self.groups.borrow_mut();
@@ -592,7 +596,7 @@ impl User {
         let group_recipients = self.recipients(group);
 
         let msg = GroupMessage::new(out_messages.into(), &group_recipients);
-        self.backend.send_msg(&msg)?;
+        self.backend.send_msg(&msg).await?;
 
         // Second, process the invitation on our end.
         group
@@ -605,6 +609,7 @@ impl User {
         log::trace!("Sending welcome");
         self.backend
             .send_welcome(&welcome)
+            .await
             .expect("Error sending Welcome message");
 
         drop(groups);
@@ -615,7 +620,7 @@ impl User {
     }
 
     /// Remove user with the given name from the group.
-    pub fn remove(&mut self, name: String, group_name: String) -> Result<(), String> {
+    pub async fn remove(&mut self, name: String, group_name: String) -> Result<(), String> {
         // Get the group ID
 
         let mut groups = self.groups.borrow_mut();
@@ -644,7 +649,7 @@ impl User {
         let group_recipients = self.recipients(group);
 
         let msg = GroupMessage::new(remove_message.into(), &group_recipients);
-        self.backend.send_msg(&msg)?;
+        self.backend.send_msg(&msg).await?;
 
         // Second, process the removal on our end.
         group

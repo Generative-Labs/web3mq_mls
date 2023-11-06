@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 /// A conversation is a list of messages (strings).
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -6,10 +7,11 @@ pub struct Conversation {
     messages: Vec<ConversationMessage>,
 }
 
+#[wasm_bindgen]
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ConversationMessage {
-    pub author: String,
-    pub message: String,
+    author: String,
+    message: String,
 }
 
 impl Conversation {
@@ -32,8 +34,30 @@ impl Conversation {
     }
 }
 
+#[wasm_bindgen]
 impl ConversationMessage {
-    pub fn new(message: String, author: String) -> Self {
+    #[wasm_bindgen(constructor)]
+    pub fn new(author: String, message: String) -> ConversationMessage {
         Self { author, message }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn author(&self) -> String {
+        self.author.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_author(&mut self, author: String) {
+        self.author = author;
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_message(&mut self, message: String) {
+        self.message = message;
     }
 }
