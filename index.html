@@ -8,10 +8,14 @@
 
 <body>
     <script type="module">
-        import init, { User } from "./pkg/web3mq_mls.js";
+        import init, { ConversationMessage, User } from "./pkg/web3mq_mls.js";
         init().then(() => {
             console.log("init success");
-            let user = User.new("Alice");
+            let user = new User("Shaw");
+            user.create_group('test-group');
+            user.send_msg('hello!', 'group_id');
+            
+            // user.register();
             console.log(user);
         });
     </script>

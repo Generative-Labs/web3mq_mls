@@ -26,6 +26,7 @@ impl Backend {
                 .map(|(b, kp)| (b, KeyPackageIn::from(kp)))
                 .collect(),
         );
+
         let response = post(&url, &client_info).await?;
         Ok(String::from_utf8(response).unwrap())
     }
@@ -51,6 +52,7 @@ impl Backend {
         url.set_path(&path);
 
         let response = get(&url).await?;
+        
         match KeyPackageIn::tls_deserialize(&mut response.as_slice()) {
             Ok(kp) => Ok(kp),
             Err(e) => Err(format!("Error decoding server response: {e:?}")),

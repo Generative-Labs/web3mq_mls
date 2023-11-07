@@ -13,8 +13,6 @@ pub struct ClientInfo {
     /// map of reserved key_packages [group_id, key_package_hash]
     pub reserved_key_pkg_hash: HashSet<Vec<u8>>,
     pub id: Vec<u8>,
-    pub msgs: Vec<MlsMessageIn>,
-    pub welcome_queue: Vec<MlsMessageIn>,
 }
 
 #[derive(
@@ -45,8 +43,6 @@ impl ClientInfo {
                     .into(),
             ),
             reserved_key_pkg_hash: HashSet::new(),
-            msgs: Vec::new(),
-            welcome_queue: Vec::new(),
         }
     }
 
@@ -54,23 +50,6 @@ impl ClientInfo {
     /// package right now.
     pub fn id(&self) -> &[u8] {
         self.id.as_slice()
-    }
-
-    /// Acquire a key package from the client's key packages
-    /// Mark the key package hash ref as "reserved key package"
-    /// The reserved hash ref will be used in DS::send_welcome and removed once welcome is distributed
-    pub fn consume_kp(&mut self) -> Result<KeyPackageIn, String> {
-        if self.key_packages.0.len() <= 1 {
-            // We keep one keypackage to handle ClientInfo serialization/deserialization issues
-            return Err("No more keypackage available".to_string());
-        }
-        match self.key_packages.0.pop() {
-            Some(c) => {
-                self.reserved_key_pkg_hash.insert(c.0.into_vec());
-                Ok(c.1)
-            }
-            None => Err("No more keypackage available".to_string()),
-        }
     }
 }
 
@@ -116,6 +95,7 @@ impl tls_codec::Deserialize for ClientInfo {
     fn tls_deserialize<R: std::io::Read>(bytes: &mut R) -> Result<Self, tls_codec::Error> {
         let client_name =
             String::from_utf8_lossy(TlsByteVecU16::tls_deserialize(bytes)?.as_slice()).into();
+
         let mut key_packages: Vec<(TlsByteVecU8, KeyPackageIn)> =
             TlsVecU32::<(TlsByteVecU8, KeyPackageIn)>::tls_deserialize(bytes)?.into();
         let key_packages = key_packages
