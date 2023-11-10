@@ -52,7 +52,7 @@ impl Backend {
         url.set_path(&path);
 
         let response = get(&url).await?;
-        
+
         match KeyPackageIn::tls_deserialize(&mut response.as_slice()) {
             Ok(kp) => Ok(kp),
             Err(e) => Err(format!("Error decoding server response: {e:?}")),
