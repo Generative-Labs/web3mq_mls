@@ -7,7 +7,10 @@ mod persistent_key_store;
 
 #[cfg(test)]
 mod crypto_store_tests {
+
     use openmls::{
+        framing::{MlsMessageIn, MlsMessageInBody, ProcessedMessageContent, ProtocolMessage},
+        group::{MlsGroup, MlsGroupConfig},
         prelude::{Credential, CredentialType, CredentialWithKey, CryptoConfig, KeyPackage},
         versions::ProtocolVersion,
     };
@@ -18,6 +21,9 @@ mod crypto_store_tests {
     };
 
     use openmls_basic_credential::SignatureKeyPair;
+    use tls_codec::{Deserialize, Serialize};
+
+    use crate::service::backend::Backend;
 
     use super::persistent_crypto::OpenMlsRustPersistentCrypto;
 
@@ -52,6 +58,7 @@ mod crypto_store_tests {
             .expect("Error reading key package from key store.");
 
         assert_eq!(loaded_key_package, alice_key_package);
+
         // delete the key package
         let _ = backend
             .key_store()
@@ -59,6 +66,112 @@ mod crypto_store_tests {
 
         let loaded_key_package: Option<KeyPackage> = backend.key_store().read(cache_key);
         assert!(loaded_key_package.is_none());
+    }
+
+    #[test]
+    fn test_message_encrypt() {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+        let backend_alice = &OpenMlsRustPersistentCrypto::default();
+        let (alice_credential_with_key, alice_signer) = generate_credential_with_key(
+            "alice".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            backend_alice,
+        );
+
+        let alice_key_package = generate_key_package(
+            ciphersuite,
+            backend_alice,
+            &alice_signer,
+            alice_credential_with_key.clone(),
+        );
+
+        let group_config = MlsGroupConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+
+        let mut mls_group = MlsGroup::new(
+            backend_alice,
+            &alice_signer,
+            &group_config,
+            alice_credential_with_key.clone(),
+        )
+        .expect("Error creating group");
+
+        let backend_bob = &OpenMlsRustPersistentCrypto::default();
+        let (bob_credential_with_key, bob_signer) = generate_credential_with_key(
+            "bob".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            backend_bob,
+        );
+
+        let bob_key_package = generate_key_package(
+            ciphersuite,
+            backend_bob,
+            &bob_signer,
+            bob_credential_with_key.clone(),
+        );
+
+        let (mls_message_out, welcome, group_info) = mls_group
+            .add_members(backend_alice, &alice_signer, &[bob_key_package])
+            .expect("Could not add members.");
+
+        mls_group
+            .merge_pending_commit(backend_alice)
+            .expect("error merging pending commit");
+
+        let serialized_welcome = welcome
+            .tls_serialize_detached()
+            .expect("Error serializing welcome");
+
+        let mls_message_in = MlsMessageIn::tls_deserialize(&mut serialized_welcome.as_slice())
+            .expect("An unexpected error occurred.");
+
+        let welcome = match mls_message_in.extract() {
+            MlsMessageInBody::Welcome(welcome) => welcome,
+            // We know it's a welcome message, so we ignore all other cases.
+            _ => unreachable!("Unexpected message type."),
+        };
+
+        let bob_group = MlsGroup::new_from_welcome(backend_bob, &group_config, welcome, None)
+            .expect("Error joining group from Welcome");
+
+        let message_out = mls_group
+            .create_message(backend_alice, &alice_signer, "hello".as_bytes())
+            .expect("Error creating message");
+
+        let mls_message_in = MlsMessageIn::tls_deserialize(&mut serialized_welcome.as_slice())
+            .expect("An unexpected error occurred.");
+
+        let msg_bytes_0: Vec<u8> = message_out
+            .tls_serialize_detached()
+            .expect("Errror serializing message");
+        print!(" >>> send: {:?}", msg_bytes_0);
+
+        let mls_message = MlsMessageIn::tls_deserialize_exact(msg_bytes_0)
+            .expect("Could not deserialize message.");
+
+        let protocol_message: ProtocolMessage = mls_message.into();
+
+        print!(" >>> protocol_message: {:?}", protocol_message);
+
+        // get the MlsGroup from groups
+        // let (mls_message_out, welcome, group_info)
+        // if throw error, print it out
+        let processed_message = mls_group
+            .process_message(backend_alice, protocol_message)
+            .expect("Error processing message");
+
+        if let ProcessedMessageContent::ApplicationMessage(application_message) =
+            processed_message.into_content()
+        {
+            // bytes to string
+            let application_message = String::from_utf8(application_message.into_bytes()).unwrap();
+            print!(" >>> application_message: {:?}", application_message);
+        } else {
+            print!("Error processing unverified message")
+        }
     }
 
     // A helper to create and store credentials.
