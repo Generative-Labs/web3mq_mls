@@ -1,7 +1,7 @@
 mod service;
 mod storage;
 // private
-mod file_helpers;
+mod index_db_helper;
 
 use service::user::User;
 use wasm_bindgen::prelude::*;
@@ -36,11 +36,6 @@ pub async fn initial_user(user_id: String) -> Result<(), String> {
 pub async fn register_user(user_id: String) -> Result<String, String> {
     let user = User::load(user_id.clone())?;
     return user.register().await;
-}
-
-#[wasm_bindgen]
-pub fn get_file_path_readable(user_id: String) -> String {
-    return User::get_file_path_readable(user_id);
 }
 
 #[wasm_bindgen]
@@ -97,4 +92,25 @@ pub fn mls_decrypt_msg(
 pub async fn leave_group(user_id: String, group_id: String) -> Result<(), String> {
     let mut user = User::load(user_id.clone())?;
     return user.leave_group(group_id).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{initial_user, service::user::User};
+
+    #[test]
+    fn test_persistent() {
+        let user_id = "Alice".to_string();
+        let loaded_user = User::load(user_id.clone());
+        // if loaded_user isNone, then create a new user
+        // and save it to the file system
+        if loaded_user.is_err() {
+            let mut user = User::new(user_id.clone());
+            user.enable_auto_save();
+            user.save();
+            print!("user created")
+        } else {
+            print!("user already exists")
+        }
+    }
 }

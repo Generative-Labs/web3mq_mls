@@ -1,14 +1,9 @@
 use openmls_traits::key_store::{MlsEntity, OpenMlsKeyStore};
+use rexie::TransactionMode;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufReader, BufWriter},
-    path::PathBuf,
-    sync::RwLock,
-};
+use std::{collections::HashMap, sync::RwLock};
 
-use crate::file_helpers;
+use crate::index_db_helper::{self, DatabaseType};
 
 #[derive(Debug, Default)]
 pub struct PersistentKeyStore {
@@ -67,12 +62,8 @@ impl OpenMlsKeyStore for PersistentKeyStore {
 }
 
 impl PersistentKeyStore {
-    fn get_file_path(user_name: &String) -> PathBuf {
-        file_helpers::get_file_path(&("openmls_cli_".to_owned() + user_name + "_ks.json"))
-    }
-
-    fn save_to_file(&self, output_file: &File) -> Result<(), String> {
-        let writer = BufWriter::new(output_file);
+    async fn save_to_file(&self, user_id: String) -> Result<(), String> {
+        // map the error to String
 
         let mut ser_ks = SerializableKeyStore::default();
         for (key, value) in &*self.values.read().unwrap() {
@@ -81,45 +72,92 @@ impl PersistentKeyStore {
                 .insert(base64::encode(key), base64::encode(value));
         }
 
-        match serde_json::to_writer_pretty(writer, &ser_ks) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        let database = index_db_helper::build_database(
+            user_id.clone(),
+            index_db_helper::DatabaseType::KeyStore,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let transaction = database
+            .transaction(
+                &[DatabaseType::KeyStore.store_name()],
+                TransactionMode::ReadWrite,
+            )
+            .map_err(|e| e.to_string())?;
+
+        let store = transaction
+            .store(DatabaseType::KeyStore.store_name().as_str())
+            .map_err(|e| e.to_string())?;
+
+        let ks = serde_wasm_bindgen::to_value(&ser_ks).unwrap();
+        let key = serde_wasm_bindgen::to_value(&user_id.clone()).unwrap();
+        store
+            .put(&ks, Some(&key))
+            .await
+            .map_err(|e| e.to_string())?;
+        transaction.done().await.map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn save(&self, user_name: String) -> Result<(), String> {
-        let ks_output_path = PersistentKeyStore::get_file_path(&user_name);
-
-        match File::create(ks_output_path) {
-            Ok(output_file) => self.save_to_file(&output_file),
-            Err(e) => Err(e.to_string()),
-        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            self.save_to_file(user_name.clone())
+                .await
+                .map_err(|e| e.to_string())
+        })?;
+        Ok(())
     }
 
-    fn load_from_file(&mut self, input_file: &File) -> Result<(), String> {
-        // Prepare file reader.
-        let reader = BufReader::new(input_file);
-
+    async fn load_from_file(&mut self, user_id: String) -> Result<(), String> {
         // Read the JSON contents of the file as an instance of `SerializableKeyStore`.
-        match serde_json::from_reader::<BufReader<&File>, SerializableKeyStore>(reader) {
-            Ok(ser_ks) => {
+
+        let database = index_db_helper::build_database(
+            user_id.clone(),
+            index_db_helper::DatabaseType::KeyStore,
+        )
+        .map_err(|e| e.to_string())?;
+        let transaction = database
+            .transaction(
+                &[DatabaseType::KeyStore.store_name()],
+                TransactionMode::ReadOnly,
+            )
+            .map_err(|e| e.to_string())?;
+
+        let store = transaction
+            .store(DatabaseType::KeyStore.store_name().as_str())
+            .map_err(|e| e.to_string())?;
+
+        let user_key_store = store
+            .get(&user_id.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        transaction.done().await.map_err(|e| e.to_string())?;
+
+        let serializable_key_store: Option<SerializableKeyStore> =
+            serde_wasm_bindgen::from_value(user_key_store).unwrap();
+
+        match serializable_key_store {
+            Some(ser_ks) => {
                 let mut ks_map = self.values.write().unwrap();
                 for (key, value) in ser_ks.values {
                     ks_map.insert(base64::decode(key).unwrap(), base64::decode(value).unwrap());
                 }
                 Ok(())
             }
-            Err(e) => Err(e.to_string()),
+            None => Ok(()),
         }
     }
 
     pub fn load(&mut self, user_name: String) -> Result<(), String> {
-        let ks_input_path = PersistentKeyStore::get_file_path(&user_name);
-
-        match File::open(ks_input_path) {
-            Ok(input_file) => self.load_from_file(&input_file),
-            Err(e) => Err(e.to_string()),
-        }
+        let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            self.load_from_file(user_name)
+                .await
+                .map_err(|e| e.to_string())
+        })?;
+        Ok(())
     }
 }
 

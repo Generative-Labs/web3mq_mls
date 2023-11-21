@@ -1,17 +1,18 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
-use std::path::PathBuf;
+use std::io::BufWriter;
+
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
 
 use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
 use openmls_traits::OpenMlsProvider;
+use rexie::{Rexie, TransactionMode};
 use tls_codec::TlsByteVecU8;
 
-use crate::file_helpers;
+use crate::index_db_helper::{self, DatabaseType};
 use crate::service::backend::Backend;
 use crate::service::client_info::{ClientKeyPackages, GroupMessage};
 use crate::service::conversation::{Conversation, ConversationMessage};
@@ -81,39 +82,42 @@ impl User {
         self.groups.borrow().keys().cloned().collect()
     }
 
-    ///
-    pub fn get_file_path_readable(user_id: String) -> String {
-        let path = User::get_file_path(&user_id);
-        return path.to_str().unwrap().to_string();
-    }
+    fn load_from_file(database: &Rexie, user_id: String) -> Result<User, String> {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            let transaction = database
+                .transaction(
+                    &[DatabaseType::User.store_name()],
+                    TransactionMode::ReadOnly,
+                )
+                .map_err(|e| e.to_string())?;
 
-    fn get_file_path(user_id: &String) -> PathBuf {
-        file_helpers::get_file_path(&("openmls_cli_".to_owned() + user_id + ".json"))
-    }
+            let store = transaction
+                .store(DatabaseType::User.store_name().as_str())
+                .map_err(|e| e.to_string())?;
 
-    fn load_from_file(input_file: &File) -> Result<User, String> {
-        // Prepare file reader.
-        let reader = BufReader::new(input_file);
-
-        // Read the JSON contents of the file as an instance of `User`.
-        match serde_json::from_reader::<BufReader<&File>, User>(reader) {
-            Ok(user) => Ok(user),
-            Err(e) => Result::Err(e.to_string()),
-        }
+            let key = serde_wasm_bindgen::to_value(&user_id.clone()).unwrap();
+            let user_value = store.get(&key).await.map_err(|e| e.to_string())?;
+            let serializable_user: Option<User> =
+                serde_wasm_bindgen::from_value(user_value).unwrap();
+            match serializable_user {
+                Some(user) => Ok(user),
+                None => Err("Error load user".to_string()),
+            }
+        });
+        result
     }
 
     ///
     pub fn load(user_id: String) -> Result<User, String> {
-        let input_path = User::get_file_path(&user_id);
-
-        match File::open(input_path) {
+        let database = index_db_helper::build_database(user_id.clone(), DatabaseType::User);
+        match database {
             Err(e) => {
                 log::error!("Error loading user state: {:?}", e.to_string());
                 Err(e.to_string())
             }
-            Ok(input_file) => {
-                let user_result = User::load_from_file(&input_file);
-
+            Ok(database) => {
+                let user_result = User::load_from_file(&database, user_id.clone());
                 if user_result.is_ok() {
                     let mut user = user_result.ok().unwrap();
                     match user.crypto.load_keystore(user_id) {
@@ -143,38 +147,55 @@ impl User {
         }
     }
 
-    fn save_to_file(&self, output_file: &File) {
-        let writer = BufWriter::new(output_file);
-        match serde_json::to_writer_pretty(writer, &self) {
-            Ok(()) => log::debug!("User state saved"),
-            Err(e) => panic!("Error serializing user: {:?}", e.to_string()),
-        }
+    async fn save_to_file(&self) {
+        let database = index_db_helper::build_database(self.user_id.clone(), DatabaseType::User)
+            .expect("Error building database");
+
+        let transaction = database
+            .transaction(
+                &[DatabaseType::User.store_name()],
+                TransactionMode::ReadWrite,
+            )
+            .expect("Error creating transaction");
+
+        let store = transaction
+            .store(DatabaseType::User.store_name().as_str())
+            .expect("Error getting store");
+
+        let ks: wasm_bindgen::prelude::JsValue = serde_wasm_bindgen::to_value(&self).unwrap();
+        let key = serde_wasm_bindgen::to_value(&self.user_id.clone()).unwrap();
+        store
+            .put(&ks, Some(&key))
+            .await
+            .expect("Error putting value");
+
+        transaction
+            .done()
+            .await
+            .expect("Error committing transaction");
     }
 
     /// Save the user state to a file.
     pub fn save(&mut self) {
-        let output_path = User::get_file_path(&self.user_id);
-        match File::create(output_path) {
-            Err(e) => panic!("Error saving user state: {:?}", e.to_string()),
-            Ok(output_file) => {
-                let groups = self.groups.get_mut();
-                for (group_name, group) in groups {
-                    self.group_list.replace(group_name.clone());
-                    group
-                        .mls_group
-                        .borrow_mut()
-                        .save(self.crypto.key_store())
-                        .unwrap();
-                }
-
-                self.save_to_file(&output_file);
-
-                match self.crypto.save_keystore(self.user_id.clone()) {
-                    Ok(_) => log::debug!("User state saved"),
-                    Err(e) => panic!("Error saving user state : {:?}", e.to_string()),
-                }
-            }
+        let groups = self.groups.get_mut();
+        for (group_name, group) in groups {
+            self.group_list.replace(group_name.clone());
+            group
+                .mls_group
+                .borrow_mut()
+                .save(self.crypto.key_store())
+                .unwrap();
         }
+
+        match self.crypto.save_keystore(self.user_id.clone()) {
+            Ok(_) => log::debug!("User state saved"),
+            Err(e) => panic!("Error saving user state : {:?}", e.to_string()),
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            self.save_to_file().await;
+        });
     }
 
     ///
