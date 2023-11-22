@@ -76,6 +76,7 @@ impl PersistentKeyStore {
             user_id.clone(),
             index_db_helper::DatabaseType::KeyStore,
         )
+        .await
         .map_err(|e| e.to_string())?;
 
         let transaction = database
@@ -99,14 +100,10 @@ impl PersistentKeyStore {
         Ok(())
     }
 
-    pub fn save(&self, user_name: String) -> Result<(), String> {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            self.save_to_file(user_name.clone())
-                .await
-                .map_err(|e| e.to_string())
-        })?;
-        Ok(())
+    pub async fn save(&self, user_name: String) -> Result<(), String> {
+        self.save_to_file(user_name.clone())
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn load_from_file(&mut self, user_id: String) -> Result<(), String> {
@@ -116,6 +113,7 @@ impl PersistentKeyStore {
             user_id.clone(),
             index_db_helper::DatabaseType::KeyStore,
         )
+        .await
         .map_err(|e| e.to_string())?;
         let transaction = database
             .transaction(
@@ -150,14 +148,10 @@ impl PersistentKeyStore {
         }
     }
 
-    pub fn load(&mut self, user_name: String) -> Result<(), String> {
-        let rt: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            self.load_from_file(user_name)
-                .await
-                .map_err(|e| e.to_string())
-        })?;
-        Ok(())
+    pub async fn load(&mut self, user_name: String) -> Result<(), String> {
+        self.load_from_file(user_name)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 

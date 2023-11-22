@@ -23,8 +23,6 @@ mod crypto_store_tests {
     use openmls_basic_credential::SignatureKeyPair;
     use tls_codec::{Deserialize, Serialize};
 
-    use crate::service::backend::Backend;
-
     use super::persistent_crypto::OpenMlsRustPersistentCrypto;
 
     #[test]

@@ -1,7 +1,5 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::BufWriter;
 
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
@@ -82,45 +80,40 @@ impl User {
         self.groups.borrow().keys().cloned().collect()
     }
 
-    fn load_from_file(database: &Rexie, user_id: String) -> Result<User, String> {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(async {
-            let transaction = database
-                .transaction(
-                    &[DatabaseType::User.store_name()],
-                    TransactionMode::ReadOnly,
-                )
-                .map_err(|e| e.to_string())?;
+    async fn load_from_file(database: &Rexie, user_id: String) -> Result<User, String> {
+        let transaction = database
+            .transaction(
+                &[DatabaseType::User.store_name()],
+                TransactionMode::ReadOnly,
+            )
+            .map_err(|e| e.to_string())?;
 
-            let store = transaction
-                .store(DatabaseType::User.store_name().as_str())
-                .map_err(|e| e.to_string())?;
+        let store = transaction
+            .store(DatabaseType::User.store_name().as_str())
+            .map_err(|e| e.to_string())?;
 
-            let key = serde_wasm_bindgen::to_value(&user_id.clone()).unwrap();
-            let user_value = store.get(&key).await.map_err(|e| e.to_string())?;
-            let serializable_user: Option<User> =
-                serde_wasm_bindgen::from_value(user_value).unwrap();
-            match serializable_user {
-                Some(user) => Ok(user),
-                None => Err("Error load user".to_string()),
-            }
-        });
-        result
+        let key = serde_wasm_bindgen::to_value(&user_id.clone()).unwrap();
+        let user_value = store.get(&key).await.map_err(|e| e.to_string())?;
+        let serializable_user: Option<User> = serde_wasm_bindgen::from_value(user_value).unwrap();
+        match serializable_user {
+            Some(user) => Ok(user),
+            None => Err("Error load user".to_string()),
+        }
     }
 
     ///
-    pub fn load(user_id: String) -> Result<User, String> {
-        let database = index_db_helper::build_database(user_id.clone(), DatabaseType::User);
+    pub async fn load(user_id: String) -> Result<User, String> {
+        let database = index_db_helper::build_database(user_id.clone(), DatabaseType::User).await;
         match database {
             Err(e) => {
                 log::error!("Error loading user state: {:?}", e.to_string());
                 Err(e.to_string())
             }
             Ok(database) => {
-                let user_result = User::load_from_file(&database, user_id.clone());
+                let user_result = User::load_from_file(&database, user_id.clone()).await;
                 if user_result.is_ok() {
                     let mut user = user_result.ok().unwrap();
-                    match user.crypto.load_keystore(user_id) {
+                    match user.crypto.load_keystore(user_id).await {
                         Ok(_) => {
                             let groups = user.groups.get_mut();
                             for group_name in &user.group_list {
@@ -149,6 +142,7 @@ impl User {
 
     async fn save_to_file(&self) {
         let database = index_db_helper::build_database(self.user_id.clone(), DatabaseType::User)
+            .await
             .expect("Error building database");
 
         let transaction = database
@@ -176,7 +170,7 @@ impl User {
     }
 
     /// Save the user state to a file.
-    pub fn save(&mut self) {
+    pub async fn save(&mut self) {
         let groups = self.groups.get_mut();
         for (group_name, group) in groups {
             self.group_list.replace(group_name.clone());
@@ -187,15 +181,12 @@ impl User {
                 .unwrap();
         }
 
-        match self.crypto.save_keystore(self.user_id.clone()) {
+        match self.crypto.save_keystore(self.user_id.clone()).await {
             Ok(_) => log::debug!("User state saved"),
             Err(e) => panic!("Error saving user state : {:?}", e.to_string()),
         }
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            self.save_to_file().await;
-        });
+        self.save_to_file().await;
     }
 
     ///
@@ -203,9 +194,9 @@ impl User {
         self.autosave_enabled = true;
     }
 
-    fn autosave(&mut self) -> bool {
+    async fn autosave(&mut self) -> bool {
         if self.autosave_enabled {
-            self.save();
+            self.save().await;
             return true;
         } else {
             return false;
@@ -322,7 +313,7 @@ impl User {
     }
 
     /// Send an application message to the group.
-    pub fn send_msg(&mut self, msg: &str, group_id: String) -> Result<String, String> {
+    pub async fn send_msg(&mut self, msg: &str, group_id: String) -> Result<String, String> {
         let mut groups = self.groups.borrow_mut();
 
         let group = match groups.get_mut(&group_id) {
@@ -349,7 +340,7 @@ impl User {
             .add(conversation_message, Some(msg_to_ds.clone()));
 
         drop(groups);
-        self.autosave();
+        self.autosave().await;
 
         Ok(msg_to_ds)
     }
@@ -569,13 +560,13 @@ impl User {
 
         self.update_clients().await;
 
-        self.autosave();
+        self.autosave().await;
 
         Ok("success".to_string())
     }
 
     /// Create a group with the given name.
-    pub fn create_group(&mut self, group_id: String) -> Result<String, String> {
+    pub async fn create_group(&mut self, group_id: String) -> Result<String, String> {
         log::debug!("{} creates group {}", self.user_id, group_id);
         let group_id_bytes = group_id.as_bytes();
         let mut group_aad = group_id_bytes.to_vec();
@@ -609,9 +600,7 @@ impl User {
         }
 
         self.groups.borrow_mut().insert(group_id.clone(), group);
-
-        self.autosave();
-
+        self.autosave().await;
         Ok(group_id.clone())
     }
 
@@ -681,7 +670,7 @@ impl User {
 
         drop(groups);
 
-        self.autosave();
+        self.autosave().await;
 
         Ok(())
     }
@@ -727,7 +716,7 @@ impl User {
 
         drop(groups);
 
-        self.autosave();
+        self.autosave().await;
 
         Ok(())
     }
@@ -804,7 +793,7 @@ impl User {
 
         drop(groups);
 
-        self.autosave();
+        self.autosave().await;
 
         Ok(())
     }
