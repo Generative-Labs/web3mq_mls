@@ -18,27 +18,12 @@ pub fn greet(name: &str) {
 
 #[wasm_bindgen]
 pub fn setup_networking_config(
-    base_url: Option<String>,
-    pubkey: Option<String>,
-    did_key: Option<String>,
-    private_key: Option<String>,
+    base_url: String,
+    pubkey: String,
+    did_key: String,
+    private_key: String,
 ) {
-    // if base_url is not None, then set base_url
-    base_url.map(|base_url| {
-        NetworkingConfig::instance().set_base_url(base_url);
-    });
-    // if pubkey is not None, then set pubkey
-    pubkey.map(|pubkey| {
-        NetworkingConfig::instance().set_pubkey(pubkey);
-    });
-    // if did_key is not None, then set did_key
-    did_key.map(|did_key| {
-        NetworkingConfig::instance().set_did_key(did_key);
-    });
-    // if private_key is not None, then set private_key
-    private_key.map(|private_key| {
-        NetworkingConfig::instance().set_private_key(private_key);
-    });
+    NetworkingConfig::instance().setup(base_url, pubkey, did_key, private_key);
 }
 
 #[wasm_bindgen]
