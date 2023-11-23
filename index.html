@@ -8,17 +8,11 @@
 
 <body>
     <script type="module">
-        import init, { greet, get_file_path_readable, initial_user } from "./pkg/web3mq_mls.js";
+        import init, { greet, initial_user } from "./pkg/web3mq_mls.js";
         init().then(async () => {
             console.log("init success");
-            // greet("Alice");
-
-            // await initial_user("Alice");
-
-            let path = get_file_path_readable("Alice");
-            console.log("path: ", path);
-
-
+            await initial_user("Alice");
+            
             // 1. get the user 
             // try {
             //     let loadedUser = User.load("user_id");

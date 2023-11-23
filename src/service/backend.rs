@@ -1,12 +1,14 @@
 use openmls::prelude::*;
+use sha2::{Digest, Sha256};
+
 use tls_codec::{Deserialize, TlsVecU16, TlsVecU32};
 use url::Url;
 
 use crate::service::client_info::{ClientInfo, ClientKeyPackages, GroupMessage};
 use crate::service::user::User;
 
-use super::networking::{get, post};
-
+use super::client_info::RegisterClientParams;
+use super::networking::{ed25519_sign, get, post, NetworkingConfig};
 pub struct Backend {
     ds_url: Url,
 }
@@ -15,18 +17,76 @@ impl Backend {
     /// Register a new client with the server.
     pub async fn register_client(&self, user: &User) -> Result<String, String> {
         let mut url = self.ds_url.clone();
-        url.set_path("/clients/register");
+        url.set_path("/api/user/key_package/");
 
-        let client_info = ClientInfo::new(
-            user.user_id.clone(),
-            user.key_packages()
-                .into_iter()
-                .map(|(b, kp)| (b, KeyPackageIn::from(kp)))
-                .collect(),
-        );
+        let key_packages = user.key_packages();
+
+        // convert user.key_packages() to TlsVecU32<(Vec<u8>, Vec<u8>)
+        let mut vec = Vec::new();
+        for (key, value) in key_packages {
+            vec.push((key, value.tls_serialize_detached().unwrap()));
+        }
+        let tls_vec = TlsVecU32::from(vec);
+
+        // let key_packages = user
+        //     .key_packages()
+        //     .into_iter()
+        //     .map(|(b, kp)| {
+        //         (
+        //             b
+        //             base64::encode(
+        //                 kp.tls_serialize_detached()
+        //                     .expect("Error serializing key package"),
+        //             ),
+        //         )
+        //     })let key_packages = user.key_packages();
+        //     .collect::<TlsVecU32<(Vec<u8>, Vec<u8>)>>();
+
+        let now = instant::SystemTime::now();
+        let timestamp = now
+            .duration_since(instant::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let payload_hash = Backend::get_payload_hash(&user.user_id, tls_vec.clone(), timestamp);
+
+        let private_key = NetworkingConfig::instance().get_private_key();
+
+        // ed25519 encrypt
+        let signature = ed25519_sign(&private_key, &payload_hash)
+            .await
+            .expect("Error signing");
+
+        let client_info = RegisterClientParams {
+            userid: user.user_id.clone(),
+            timestamp,
+            key_packages: tls_vec,
+            payload_hash: payload_hash,
+            web3mq_user_mainkey_signature: signature,
+        };
 
         let response = post(&url, &client_info).await?;
         Ok(String::from_utf8(response).unwrap())
+    }
+
+    /// sha256_hash(
+    ///    userid + base64_encode(json_dumps(key_package)) + timestamp
+    /// )
+    fn get_payload_hash(
+        user_id: &str,
+        key_package: TlsVecU32<(Vec<u8>, Vec<u8>)>,
+        timestamp: u64,
+    ) -> String {
+        let content = format!(
+            "{}{}{}",
+            user_id,
+            base64::encode(key_package.tls_serialize_detached().unwrap()),
+            timestamp
+        );
+        // sha256 hash
+        return Sha256::digest(content.as_bytes())
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
     }
 
     /// Get a list of all clients with name, ID, and key packages from the

@@ -3,7 +3,7 @@ mod storage;
 // private
 mod index_db_helper;
 
-use service::user::User;
+use service::{networking::NetworkingConfig, user::User};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -14,6 +14,31 @@ extern "C" {
 #[wasm_bindgen]
 pub fn greet(name: &str) {
     alert(&format!("Hello, {}!", name));
+}
+
+#[wasm_bindgen]
+pub fn setup_networking_config(
+    base_url: Option<String>,
+    pubkey: Option<String>,
+    did_key: Option<String>,
+    private_key: Option<String>,
+) {
+    // if base_url is not None, then set base_url
+    base_url.map(|base_url| {
+        NetworkingConfig::instance().set_base_url(base_url);
+    });
+    // if pubkey is not None, then set pubkey
+    pubkey.map(|pubkey| {
+        NetworkingConfig::instance().set_pubkey(pubkey);
+    });
+    // if did_key is not None, then set did_key
+    did_key.map(|did_key| {
+        NetworkingConfig::instance().set_did_key(did_key);
+    });
+    // if private_key is not None, then set private_key
+    private_key.map(|private_key| {
+        NetworkingConfig::instance().set_private_key(private_key);
+    });
 }
 
 #[wasm_bindgen]

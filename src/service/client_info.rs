@@ -17,6 +17,15 @@ pub struct ClientInfo {
     pub welcome_queue: Vec<MlsMessageIn>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct RegisterClientParams {
+    pub userid: String,
+    pub timestamp: u64,
+    pub key_packages: TlsVecU32<(Vec<u8>, Vec<u8>)>,
+    pub payload_hash: String,
+    pub web3mq_user_mainkey_signature: String,
+}
+
 #[derive(
     Debug,
     Default,
@@ -33,7 +42,7 @@ pub struct ClientKeyPackages(pub TlsVecU32<(TlsByteVecU8, KeyPackageIn)>);
 impl ClientInfo {
     /// Create a new `ClientInfo` struct for a given client name and vector of
     /// key packages with corresponding hashes.
-pub fn new(client_name: String, mut key_packages: Vec<(Vec<u8>, KeyPackageIn)>) -> Self {
+    pub fn new(client_name: String, mut key_packages: Vec<(Vec<u8>, KeyPackageIn)>) -> Self {
         let key_package: KeyPackage = KeyPackage::from(key_packages[0].1.clone());
         let id = key_package.leaf_node().credential().identity().to_vec();
         Self {
@@ -126,6 +135,52 @@ impl tls_codec::Deserialize for ClientInfo {
             .map(|(e1, e2)| (e1.into(), e2))
             .collect();
         Ok(Self::new(client_name, key_packages))
+    }
+}
+
+impl tls_codec::Size for RegisterClientParams {
+    fn tls_serialized_len(&self) -> usize {
+        self.userid.as_bytes().tls_serialized_len()
+            + self.timestamp.tls_serialized_len()
+            + self.key_packages.tls_serialized_len()
+            + self.payload_hash.as_bytes().tls_serialized_len()
+            + self
+                .web3mq_user_mainkey_signature
+                .as_bytes()
+                .tls_serialized_len()
+    }
+}
+
+impl tls_codec::Serialize for RegisterClientParams {
+    fn tls_serialize<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, tls_codec::Error> {
+        let written = self.userid.as_bytes().tls_serialize(writer)?;
+        self.timestamp.tls_serialize(writer)?;
+        self.key_packages.tls_serialize(writer)?;
+        self.payload_hash.as_bytes().tls_serialize(writer)?;
+        self.web3mq_user_mainkey_signature
+            .as_bytes()
+            .tls_serialize(writer)
+            .map(|l| l + written)
+    }
+}
+
+impl tls_codec::Deserialize for RegisterClientParams {
+    fn tls_deserialize<R: std::io::Read>(bytes: &mut R) -> Result<Self, tls_codec::Error> {
+        let user_id =
+            String::from_utf8_lossy(TlsByteVecU16::tls_deserialize(bytes)?.as_slice()).into();
+        let timestamp = u64::tls_deserialize(bytes)?;
+        let key_packages = TlsVecU32::<(Vec<u8>, Vec<u8>)>::tls_deserialize(bytes)?;
+        let payload_hash =
+            String::from_utf8_lossy(TlsByteVecU16::tls_deserialize(bytes)?.as_slice()).into();
+        let web3mq_user_mainkey_signature =
+            String::from_utf8_lossy(TlsByteVecU16::tls_deserialize(bytes)?.as_slice()).into();
+        Ok(Self {
+            userid: user_id,
+            timestamp: timestamp,
+            key_packages: key_packages,
+            payload_hash: payload_hash,
+            web3mq_user_mainkey_signature: web3mq_user_mainkey_signature,
+        })
     }
 }
 
