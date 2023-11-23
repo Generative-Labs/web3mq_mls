@@ -28,20 +28,6 @@ impl Backend {
         }
         let tls_vec = TlsVecU32::from(vec);
 
-        // let key_packages = user
-        //     .key_packages()
-        //     .into_iter()
-        //     .map(|(b, kp)| {
-        //         (
-        //             b
-        //             base64::encode(
-        //                 kp.tls_serialize_detached()
-        //                     .expect("Error serializing key package"),
-        //             ),
-        //         )
-        //     })let key_packages = user.key_packages();
-        //     .collect::<TlsVecU32<(Vec<u8>, Vec<u8>)>>();
-
         let now = instant::SystemTime::now();
         let timestamp = now
             .duration_since(instant::SystemTime::UNIX_EPOCH)

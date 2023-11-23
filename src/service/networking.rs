@@ -51,6 +51,16 @@ impl NetworkingConfig {
     pub fn get_private_key(&self) -> String {
         self.private_key.lock().unwrap().to_string()
     }
+
+    fn default_headers(&self) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "web3mq-request-pubkey",
+            self.pubkey.lock().unwrap().parse().unwrap(),
+        );
+        headers.insert("didkey", self.did_key.lock().unwrap().parse().unwrap());
+        headers
+    }
 }
 
 pub async fn ed25519_sign(private_key: &str, sign_content: &str) -> Result<String, String> {
@@ -70,14 +80,10 @@ pub async fn post(url: &Url, msg: &impl Serialize) -> Result<Vec<u8>, String> {
     log::debug!("Post {:?}", url);
     log::trace!("Payload: {:?}", serialized_msg);
 
-    let config = NetworkingConfig::instance();
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "web3mq-request-pubkey",
-        config.pubkey.lock().unwrap().parse().unwrap(),
-    );
-    headers.insert("didkey", config.did_key.lock().unwrap().parse().unwrap());
-    let client = Client::builder().default_headers(headers).build().unwrap();
+    let client = Client::builder()
+        .default_headers(NetworkingConfig::instance().default_headers())
+        .build()
+        .unwrap();
 
     let response = client
         .post(url.to_string())
@@ -99,14 +105,10 @@ pub async fn post(url: &Url, msg: &impl Serialize) -> Result<Vec<u8>, String> {
 }
 
 pub async fn get(url: &Url) -> Result<Vec<u8>, String> {
-    let config = NetworkingConfig::instance();
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "web3mq-request-pubkey",
-        config.pubkey.lock().unwrap().parse().unwrap(),
-    );
-    headers.insert("didkey", config.did_key.lock().unwrap().parse().unwrap());
-    let client = Client::builder().default_headers(headers).build().unwrap();
+    let client = Client::builder()
+        .default_headers(NetworkingConfig::instance().default_headers())
+        .build()
+        .unwrap();
 
     log::debug!("Get {:?}", url);
     let response = client.get(url.to_string()).send().await;
