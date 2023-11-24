@@ -1,54 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en-US">
-
-<head>
+  <head>
     <meta charset="utf-8" />
     <title>hello-wasm example</title>
-</head>
+  </head>
 
-<body>
+  <body>
     <script type="module">
-        import init, { greet, initial_user } from "./pkg/web3mq_mls.js";
-        init().then(async () => {
-            console.log("init success");
-            await initial_user("Alice");
-            
-            // 1. get the user 
-            // try {
-            //     let loadedUser = User.load("user_id");
-            //     console.log("loaded user", loadedUser);
-            // } catch (error) {
-            //     let createdUser = new User("user_id");
-            //     console.log("created user", createdUser);
-            //     createdUser.enable_auto_save();
-            //     createdUser.register();
-            // }
+      import init, {
+        greet,
+        setup_networking_config,
+        get_base_url,
+      } from "./pkg/web3mq_mls.js";
+      init().then(async () => {
+        console.log("init success");
+        setup_networking_config(
+          "https://web3mq.com/",
+          "pubkey",
+          "did_key",
+          "private_key"
+        );
 
-            // // 2. create group 
-            // user.create_group('test-group');
+        // await initial_user("Alice");
+        // 1. get the user
+        // try {
+        //     let loadedUser = User.load("user_id");
+        //     console.log("loaded user", loadedUser);
+        // } catch (error) {
+        //     let createdUser = new User("user_id");
+        //     console.log("created user", createdUser);
+        //     createdUser.enable_auto_save();
+        //     createdUser.register();
+        // }
 
-            // // 3. invite user 
-            // user.update_clients();
-            // // call invite api fristly.
-            // user.inivite("target_user_id", "group_id");
+        // // 2. create group
+        // user.create_group('test-group');
 
-            // // when enter group    
-            // user.update('group_id');
+        // // 3. invite user
+        // user.update_clients();
+        // // call invite api fristly.
+        // user.inivite("target_user_id", "group_id");
 
-            // // 4. send message 
-            // // call ws send message 
-            // user.send_msg('hello!', 'group_id');
+        // // when enter group
+        // user.update('group_id');
 
-            // // 5. receive message
-            // // handle the message 
+        // // 4. send message
+        // // call ws send message
+        // user.send_msg('hello!', 'group_id');
 
-            // // user.register();
+        // // 5. receive message
+        // // handle the message
 
-            // // 6. remove a user 
-            // user.remove("user_id", "group_id");
+        // // user.register();
 
-        });
+        // // 6. remove a user
+        // user.remove("user_id", "group_id");
+      });
     </script>
-</body>
-
+  </body>
 </html>

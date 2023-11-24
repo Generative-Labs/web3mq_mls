@@ -52,11 +52,25 @@ impl NetworkingConfig {
         self.private_key.lock().unwrap().to_string()
     }
 
-    pub fn setup(&self, base_url: String, pubkey: String, did_key: String, private_key: String) {
-        self.set_base_url(base_url);
-        self.set_pubkey(pubkey);
-        self.set_did_key(did_key);
-        self.set_private_key(private_key);
+    pub fn setup(
+        &self,
+        base_url: Option<String>,
+        pubkey: Option<String>,
+        did_key: Option<String>,
+        private_key: Option<String>,
+    ) {
+        if let Some(base_url) = base_url {
+            self.set_base_url(base_url);
+        }
+        if let Some(pubkey) = pubkey {
+            self.set_pubkey(pubkey);
+        }
+        if let Some(did_key) = did_key {
+            self.set_did_key(did_key);
+        }
+        if let Some(private_key) = private_key {
+            self.set_private_key(private_key);
+        }
     }
 
     fn default_headers(&self) -> HeaderMap {

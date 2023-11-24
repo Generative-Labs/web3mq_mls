@@ -91,20 +91,16 @@ impl ClientInfo {
 #[derive(Debug)]
 pub struct GroupMessage {
     pub msg: MlsMessageIn,
-    pub recipients: TlsVecU32<TlsByteVecU32>,
+    pub recipient: TlsByteVecU32,
 }
 
 impl GroupMessage {
     /// Create a new `GroupMessage` taking an `MlsMessageIn` and slice of
     /// recipient names.
-    pub fn new(msg: MlsMessageIn, recipients: &[Vec<u8>]) -> Self {
+    pub fn new(msg: MlsMessageIn, recipient: Vec<u8>) -> Self {
         Self {
             msg,
-            recipients: recipients
-                .iter()
-                .map(|r| r.clone().into())
-                .collect::<Vec<TlsByteVecU32>>()
-                .into(),
+            recipient: recipient.clone().into(),
         }
     }
 }
@@ -186,21 +182,21 @@ impl tls_codec::Deserialize for RegisterClientParams {
 
 impl tls_codec::Size for GroupMessage {
     fn tls_serialized_len(&self) -> usize {
-        self.msg.tls_serialized_len() + self.recipients.tls_serialized_len()
+        self.msg.tls_serialized_len() + self.recipient.tls_serialized_len()
     }
 }
 
 impl tls_codec::Serialize for GroupMessage {
     fn tls_serialize<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, tls_codec::Error> {
         let written = self.msg.tls_serialize(writer)?;
-        self.recipients.tls_serialize(writer).map(|l| l + written)
+        self.recipient.tls_serialize(writer).map(|l| l + written)
     }
 }
 
 impl tls_codec::Deserialize for GroupMessage {
     fn tls_deserialize<R: std::io::Read>(bytes: &mut R) -> Result<Self, tls_codec::Error> {
         let msg = MlsMessageIn::tls_deserialize(bytes)?;
-        let recipients = TlsVecU32::<TlsByteVecU32>::tls_deserialize(bytes)?;
-        Ok(Self { msg, recipients })
+        let recipient = TlsByteVecU32::tls_deserialize(bytes)?;
+        Ok(Self { msg, recipient })
     }
 }

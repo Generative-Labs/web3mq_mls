@@ -89,10 +89,10 @@ impl Backend {
     }
 
     /// Get and reserve a key package for a client.
-    pub async fn consume_key_package(&self, client_id: &[u8]) -> Result<KeyPackageIn, String> {
+    pub async fn consume_key_package(&self, user_id: &[u8]) -> Result<KeyPackageIn, String> {
         let mut url = self.ds_url.clone();
-        let path = "/clients/key_package/".to_string()
-            + &base64::encode_config(client_id, base64::URL_SAFE);
+        let path =
+            "/clients/key_package/".to_string() + &base64::encode_config(user_id, base64::URL_SAFE);
         url.set_path(&path);
 
         let response = get(&url).await?;
@@ -141,7 +141,7 @@ impl Backend {
     /// Get a list of all new messages for the user.
     pub async fn recv_msgs(&self, user: &User) -> Result<Vec<MlsMessageIn>, String> {
         let mut url = self.ds_url.clone();
-        let path = "/recv/".to_string()
+        let path = "/api/group/mls_state/".to_string()
             + &base64::encode_config(user.identity.borrow().identity(), base64::URL_SAFE);
         url.set_path(&path);
 
