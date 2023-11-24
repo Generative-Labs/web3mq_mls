@@ -114,7 +114,11 @@ pub async fn handle_mls_group_event(user_id: String, msg_bytes: Vec<u8>) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use crate::service::user::User;
+    use crate::service::{
+        backend::{self, Backend},
+        networking::ed25519_sign,
+        user::User,
+    };
 
     #[tokio::test]
     async fn test_persistent() {
@@ -130,5 +134,16 @@ mod tests {
         } else {
             print!("user already exists")
         }
+    }
+
+    #[tokio::test]
+    async fn test_ed25519() {
+        let private_key = "212E8F31AD54D79E075A04802C2B307E339B3373072F80E721880702C052B637";
+        let sign_content = "hello";
+        let result_should_be = "E1B7A23CE8D2B8A81EAB627F5936606A853D215A9CA5E56BD3D9871692E731C7D32E40ABF8A4C0D547749E5BD2DAE6AFD7A200A11CDA79A0EEE35029F2E24E03".to_lowercase();
+        let signature = ed25519_sign(private_key, sign_content).await;
+        print!("signature: {:?}", signature);
+        assert_eq!(signature.is_ok(), true);
+        assert_eq!(signature.unwrap(), result_should_be);
     }
 }

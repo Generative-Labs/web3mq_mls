@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use openmls::prelude::*;
 use tls_codec::{
@@ -24,6 +24,15 @@ pub struct RegisterClientParams {
     pub key_packages: TlsVecU32<(Vec<u8>, Vec<u8>)>,
     pub payload_hash: String,
     pub web3mq_user_mainkey_signature: String,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegisterKeyPackageParams {
+    pub userid: String,
+    pub timestamp: u128,
+    pub key_packages: HashMap<String, String>,
+    pub payload_hash: String,
+    pub web3mq_user_signature: String,
 }
 
 #[derive(

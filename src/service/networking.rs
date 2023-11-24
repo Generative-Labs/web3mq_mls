@@ -1,11 +1,12 @@
 use ed25519_dalek::{Signer, SigningKey};
 use reqwest::{header::HeaderMap, Client, StatusCode};
+use serde_json::Value;
 use url::Url;
 
 use tls_codec::Serialize;
 
 use lazy_static::lazy_static;
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use base64;
 
@@ -85,15 +86,15 @@ impl NetworkingConfig {
 }
 
 pub async fn ed25519_sign(private_key: &str, sign_content: &str) -> Result<String, String> {
-    let private_key_bytes =
-        base64::decode(&private_key.as_bytes()).map_err(|_| "Failed to decode private key")?;
+    // private_key is hex encoded, should convert it to bytes
+    let private_key_bytes = hex::decode(private_key).map_err(|_| "Failed to decode private key")?;
     let private_key_bytes: &[u8; 32] = private_key_bytes
         .as_slice()
         .try_into()
         .map_err(|_| "Invalid private key length")?;
-    let keypair = SigningKey::from_bytes(private_key_bytes);
-    let signature = keypair.sign(sign_content.as_bytes());
-    Ok(base64::encode(signature.to_bytes()))
+    let key_pair = SigningKey::from_bytes(private_key_bytes);
+    let signature = key_pair.sign(sign_content.as_bytes());
+    Ok(hex::encode(signature.to_bytes()))
 }
 
 pub async fn post(url: &Url, msg: &impl Serialize) -> Result<Vec<u8>, String> {
@@ -133,6 +134,43 @@ pub async fn get(url: &Url) -> Result<Vec<u8>, String> {
 
     log::debug!("Get {:?}", url);
     let response = client.get(url.to_string()).send().await;
+    if let Ok(r) = response {
+        if r.status() != StatusCode::OK {
+            return Err(format!("Error status code {:?}", r.status()));
+        }
+        match r.bytes().await {
+            Ok(bytes) => Ok(bytes.as_ref().to_vec()),
+            Err(e) => Err(format!("Error retrieving bytes from response: {e:?}")),
+        }
+    } else {
+        Err(format!("ERROR: {:?}", response.err()))
+    }
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+struct ClientInfo {
+    pub user_id: String,
+    pub key_packages: HashMap<String, String>,
+}
+
+impl ClientInfo {
+    fn new(user_id: String, key_packages: HashMap<String, String>) -> Self {
+        Self {
+            user_id,
+            key_packages,
+        }
+    }
+}
+
+///
+pub async fn _post(url: &Url, msg: &impl serde::Serialize) -> Result<Vec<u8>, String> {
+    let json_string = serde_json::to_string(msg).unwrap();
+    let body: HashMap<String, Value> = serde_json::from_str(&json_string).unwrap();
+    let client = Client::builder()
+        .default_headers(NetworkingConfig::instance().default_headers())
+        .build()
+        .unwrap();
+    let response = client.post(url.to_string()).json(&body).send().await;
     if let Ok(r) = response {
         if r.status() != StatusCode::OK {
             return Err(format!("Error status code {:?}", r.status()));
