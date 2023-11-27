@@ -1,7 +1,8 @@
+use std::{collections::HashMap, sync::RwLock};
+
 use openmls_traits::key_store::{MlsEntity, OpenMlsKeyStore};
 use rexie::TransactionMode;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::RwLock};
 
 use crate::index_db_helper::{self, DatabaseType};
 
@@ -64,12 +65,12 @@ impl OpenMlsKeyStore for PersistentKeyStore {
 impl PersistentKeyStore {
     async fn save_to_file(&self, user_id: String) -> Result<(), String> {
         // map the error to String
-
         let mut ser_ks = SerializableKeyStore::default();
         for (key, value) in &*self.values.read().unwrap() {
-            ser_ks
-                .values
-                .insert(base64::encode(key), base64::encode(value));
+            ser_ks.values.insert(
+                base64::encode_config(key, base64::URL_SAFE),
+                base64::encode_config(value, base64::URL_SAFE),
+            );
         }
 
         let database = index_db_helper::build_database(
@@ -140,7 +141,10 @@ impl PersistentKeyStore {
             Some(ser_ks) => {
                 let mut ks_map = self.values.write().unwrap();
                 for (key, value) in ser_ks.values {
-                    ks_map.insert(base64::decode(key).unwrap(), base64::decode(value).unwrap());
+                    ks_map.insert(
+                        base64::decode_config(key, base64::URL_SAFE).unwrap(),
+                        base64::decode_config(value, base64::URL_SAFE).unwrap(),
+                    );
                 }
                 Ok(())
             }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// A conversation is a list of messa
+/// A conversation is a list of message
 /// ges (strings).
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct Conversation {

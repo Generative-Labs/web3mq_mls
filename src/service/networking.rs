@@ -1,14 +1,12 @@
-use ed25519_dalek::{Signer, SigningKey};
-use reqwest::{header::HeaderMap, Client, StatusCode};
-use serde_json::Value;
-use url::Url;
-
-use tls_codec::Serialize;
-
-use lazy_static::lazy_static;
 use std::{collections::HashMap, sync::Mutex};
 
 use base64;
+use ed25519_dalek::{Signer, SigningKey};
+use lazy_static::lazy_static;
+use reqwest::{header::HeaderMap, Client, StatusCode};
+use serde_json::Value;
+use tls_codec::Serialize;
+use url::Url;
 
 pub struct NetworkingConfig {
     pub base_url: Mutex<String>,

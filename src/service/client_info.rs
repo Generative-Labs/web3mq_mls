@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use openmls::prelude::*;
 use tls_codec::{
-    TlsByteSliceU16, TlsByteVecU16, TlsByteVecU32, TlsByteVecU8, TlsDeserialize, TlsSerialize,
-    TlsSize, TlsVecU32,
+    TlsByteSliceU16, TlsByteVecU16, TlsByteVecU8, TlsDeserialize, TlsSerialize, TlsSize, TlsVecU32,
 };
 
 #[derive(Debug, Default, Clone)]

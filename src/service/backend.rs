@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use openmls::prelude::*;
 use serde_json::from_slice;
 use sha2::{Digest, Sha256};
@@ -60,7 +58,7 @@ impl Backend {
 
         let private_key = NetworkingConfig::instance().get_private_key();
         let json_string = serde_json::to_string(&key_packages.clone()).expect("Error serializing");
-        let body = base64::encode(json_string);
+        let body = base64::encode_config(json_string, base64::URL_SAFE);
 
         let (signature, payload_hash, timestamp) =
             Backend::sign_request(&user.user_id, &body, &private_key);
@@ -80,8 +78,11 @@ impl Backend {
     /// Get and reserve a key package for a client.
     pub async fn consume_key_package(&self, user_id: &str) -> Result<KeyPackageIn, String> {
         let mut url = self.ds_url.clone();
-        let path = format!("/api/user/key_package/&target_user_id={}", user_id);
-        url.set_path(&path);
+        // let path = format!("/api/user/key_packages/?target_user_id={}", user_id);
+        url.set_path("/api/user/key_packages/");
+
+        let query = format!("target_user_id={}", user_id);
+        url.set_query(Some(&query));
 
         let response = get(&url).await?;
         let response: Response<KeyPackagesResult> = from_slice(&response)
@@ -94,8 +95,14 @@ impl Backend {
             .last()
             .ok_or("No key packages found".to_string())?;
 
-        let first_key_package_bytes = base64::decode(first_key_package_base64)
-            .map_err(|_| "Failed to decode base64 string".to_string())?;
+        print!(
+            "debug:first_key_package_base64: {:?}",
+            first_key_package_base64
+        );
+
+        let first_key_package_bytes =
+            base64::decode_config(first_key_package_base64, base64::URL_SAFE)
+                .map_err(|_| "Failed to decode base64 string".to_string())?;
 
         KeyPackageIn::tls_deserialize(&mut first_key_package_bytes.as_slice())
             .map_err(|e| format!("Error decoding server response: {:?}", e))
@@ -127,7 +134,10 @@ impl Backend {
         let mut url = self.ds_url.clone();
         url.set_path("/api/group/mls_state/");
 
-        let msg_base64_string = base64::encode(welcome_msg.tls_serialize_detached().unwrap());
+        let msg_base64_string = base64::encode_config(
+            welcome_msg.tls_serialize_detached().unwrap(),
+            base64::URL_SAFE,
+        );
         let body = receiver.to_owned() + &msg_base64_string;
         let private_key = NetworkingConfig::instance().get_private_key();
 
@@ -154,7 +164,10 @@ impl Backend {
         url.set_path("/send/message");
 
         let receiver_user_id = &group_msg.recipient;
-        let msg_base64_string = base64::encode(group_msg.msg.tls_serialize_detached().unwrap());
+        let msg_base64_string = base64::encode_config(
+            group_msg.msg.tls_serialize_detached().unwrap(),
+            base64::URL_SAFE,
+        );
         let body = receiver_user_id.clone() + &msg_base64_string;
         let private_key = NetworkingConfig::instance().get_private_key();
 
@@ -188,6 +201,10 @@ impl Backend {
             Ok(r) => Ok(r.into()),
             Err(e) => Err(format!("Invalid message list: {e:?}")),
         }
+    }
+
+    pub fn reset_ds_url(&mut self, ds_url: &str) {
+        self.ds_url = Url::parse(ds_url).unwrap();
     }
 }
 

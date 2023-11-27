@@ -1,12 +1,13 @@
+use openmls::framing::MlsMessageIn;
+use tls_codec::Deserialize;
+use wasm_bindgen::prelude::*;
+
+use service::{networking::NetworkingConfig, user::User};
+
 mod service;
 mod storage;
 // private
 mod index_db_helper;
-
-use openmls::framing::MlsMessageIn;
-use service::{networking::NetworkingConfig, user::User};
-use tls_codec::Deserialize;
-use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -33,15 +34,15 @@ pub async fn initial_user(user_id: String) -> Result<(), String> {
     let loaded_user = User::load(user_id.clone()).await;
     // if loaded_user isNone, then create a new user
     // and save it to the file system
-    if loaded_user.is_err() {
+    return if loaded_user.is_err() {
         let mut user = User::new(user_id.clone());
         user.enable_auto_save();
         let _ = user.register().await?;
         user.save().await;
-        return Ok(());
+        Ok(())
     } else {
-        return Ok(());
-    }
+        Ok(())
+    };
 }
 
 #[wasm_bindgen]
@@ -114,10 +115,21 @@ pub async fn handle_mls_group_event(user_id: String, msg_bytes: Vec<u8>) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use crate::service::{
-        backend::{self, Backend},
-        networking::ed25519_sign,
-        user::User,
+
+    use httpmock::{
+        Method::{GET, POST},
+        MockServer,
+    };
+    use serde_json::json;
+
+    use crate::{
+        initial_user,
+        service::{
+            backend::{self, Backend},
+            networking::ed25519_sign,
+            user::User,
+        },
+        setup_networking_config,
     };
 
     #[tokio::test]
@@ -145,5 +157,90 @@ mod tests {
         print!("signature: {:?}", signature);
         assert_eq!(signature.is_ok(), true);
         assert_eq!(signature.unwrap(), result_should_be);
+    }
+
+    #[tokio::test]
+    async fn test_register_key_package() {
+        // Start a lightweight mock server.
+        let server = MockServer::start();
+
+        // Create a mock on the server.
+        let hello_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/user/key_package/")
+                .query_param("word", "hello");
+            then.status(200)
+                .header("content-type", "text/html; charset=UTF-8")
+                .body("Привет");
+        });
+
+        let user = User::new("Alice".to_string());
+
+        let backend = Backend::default();
+        backend.register_key_packages(&user).await;
+
+        // user.register().await;
+
+        hello_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_consume_key_package() {
+        let user_id = "Alice".to_string();
+        let mut user = User::new(user_id.clone());
+
+        let private_key = "212E8F31AD54D79E075A04802C2B307E339B3373072F80E721880702C052B637";
+        setup_networking_config(
+            None,
+            None,
+            None,
+            std::option::Option::Some(private_key.to_string()),
+        );
+
+        let server = MockServer::start();
+        user.reset_ds_url(&server.base_url());
+
+        // let path = format!("/api/user/key_packages/?target_user_id={}", user_id);
+        // Create a mock on the server.
+        let get_mock = server.mock(|when, then| {
+            when.method(GET)
+            .path("/api/user/key_packages/")
+            .query_param("target_user_id", user_id.clone());
+            then.status(200).json_body(json!({ "code": 0,  "msg": "ok",  "data": {"userid": user.user_id.clone(), "timestamp": 0, "web3mq_user_signature": "", "key_packages": user.key_packages_map()}  }));
+        });
+
+        let can_invite = user.can_invite(&user_id.clone()).await;
+        assert_eq!(can_invite, true);
+        get_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_post_key_package() {
+        let user_id = "Alice".to_string();
+        let mut user = User::new(user_id.clone());
+
+        let private_key = "212E8F31AD54D79E075A04802C2B307E339B3373072F80E721880702C052B637";
+        setup_networking_config(
+            None,
+            None,
+            None,
+            std::option::Option::Some(private_key.to_string()),
+        );
+
+        // Start a lightweight mock server.
+        let server = MockServer::start();
+        print!("server: {:?}", server.base_url());
+        user.reset_ds_url(&server.base_url());
+
+        let post_mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/user/key_package/");
+            then.status(200).json_body(json!({ "code": 0 , "msg": "ok",  "data": {"userid": user.user_id.clone(), "timestamp": 0, "web3mq_user_signature": "", "key_packages": user.key_packages_map()} }));
+        });
+
+        let result: Result<String, String> = user.register().await;
+        print!("result: {:?}", result);
+        assert_eq!(result.is_ok(), true);
+        post_mock.assert();
     }
 }

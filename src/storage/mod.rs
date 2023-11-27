@@ -7,20 +7,18 @@ mod persistent_key_store;
 
 #[cfg(test)]
 mod crypto_store_tests {
-
     use openmls::{
         framing::{MlsMessageIn, MlsMessageInBody, ProcessedMessageContent, ProtocolMessage},
         group::{MlsGroup, MlsGroupConfig},
         prelude::{Credential, CredentialType, CredentialWithKey, CryptoConfig, KeyPackage},
         versions::ProtocolVersion,
     };
+    use openmls_basic_credential::SignatureKeyPair;
     use openmls_traits::{
         key_store::OpenMlsKeyStore,
         types::{Ciphersuite, SignatureScheme},
         OpenMlsProvider,
     };
-
-    use openmls_basic_credential::SignatureKeyPair;
     use tls_codec::{Deserialize, Serialize};
 
     use super::persistent_crypto::OpenMlsRustPersistentCrypto;
@@ -187,7 +185,6 @@ mod crypto_store_tests {
         signature_keys
             .store(backend.key_store())
             .expect("Error storing signature keys in key store.");
-
         (
             CredentialWithKey {
                 credential,

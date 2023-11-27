@@ -1,6 +1,5 @@
 use std::borrow::BorrowMut;
 use std::collections::HashSet;
-
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
 
@@ -621,7 +620,9 @@ impl User {
 
     /// Check if the user with the given name can be invited to the group.
     pub async fn can_invite(&self, user_id: &str) -> bool {
-        self.backend.consume_key_package(user_id).await.is_ok()
+        let result = self.backend.consume_key_package(user_id).await;
+        print!("can_invite: {:?}", result);
+        result.is_ok()
     }
 
     /// Invite user with the given name to the group.
@@ -806,5 +807,9 @@ impl User {
         self.autosave().await;
 
         Ok(())
+    }
+
+    pub fn reset_ds_url(&mut self, ds_url: &str) {
+        self.backend.reset_ds_url(ds_url);
     }
 }

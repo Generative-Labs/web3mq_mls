@@ -1,6 +1,7 @@
-use super::persistent_key_store::PersistentKeyStore;
 use openmls_rust_crypto::RustCrypto;
 use openmls_traits::OpenMlsProvider;
+
+use super::persistent_key_store::PersistentKeyStore;
 
 #[derive(Default, Debug)]
 pub struct OpenMlsRustPersistentCrypto {
