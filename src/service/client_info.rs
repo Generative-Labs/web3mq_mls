@@ -35,6 +35,16 @@ pub struct RegisterKeyPackageParams {
     pub web3mq_user_signature: String,
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SendMessageParams {
+    pub userid: String,
+    pub timestamp: u128,
+    pub web3mq_user_signature: String,
+    pub payload_hash: String,
+    pub mls_msg: String,
+    pub recipients_topic_id: String,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct KeyPackagesResult {
     pub(crate) userid: String,
@@ -115,16 +125,16 @@ impl ClientInfo {
 #[derive(Debug)]
 pub struct GroupMessage {
     pub msg: MlsMessageIn,
-    pub recipient: TlsByteVecU32,
+    pub recipient: String,
 }
 
 impl GroupMessage {
     /// Create a new `GroupMessage` taking an `MlsMessageIn` and slice of
     /// recipient names.
-    pub fn new(msg: MlsMessageIn, recipient: Vec<u8>) -> Self {
+    pub fn new(msg: MlsMessageIn, recipient: &str) -> Self {
         Self {
             msg,
-            recipient: recipient.clone().into(),
+            recipient: recipient.to_string(),
         }
     }
 }
@@ -204,23 +214,23 @@ impl tls_codec::Deserialize for RegisterClientParams {
     }
 }
 
-impl tls_codec::Size for GroupMessage {
-    fn tls_serialized_len(&self) -> usize {
-        self.msg.tls_serialized_len() + self.recipient.tls_serialized_len()
-    }
-}
+// impl tls_codec::Size for GroupMessage {
+//     fn tls_serialized_len(&self) -> usize {
+//         self.msg.tls_serialized_len() + self.recipient.tls_serialized_len()
+//     }
+// }
 
-impl tls_codec::Serialize for GroupMessage {
-    fn tls_serialize<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, tls_codec::Error> {
-        let written = self.msg.tls_serialize(writer)?;
-        self.recipient.tls_serialize(writer).map(|l| l + written)
-    }
-}
+// impl tls_codec::Serialize for GroupMessage {
+//     fn tls_serialize<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, tls_codec::Error> {
+//         let written = self.msg.tls_serialize(writer)?;
+//         self.recipient.tls_serialize(writer).map(|l| l + written)
+//     }
+// }
 
-impl tls_codec::Deserialize for GroupMessage {
-    fn tls_deserialize<R: std::io::Read>(bytes: &mut R) -> Result<Self, tls_codec::Error> {
-        let msg = MlsMessageIn::tls_deserialize(bytes)?;
-        let recipient = TlsByteVecU32::tls_deserialize(bytes)?;
-        Ok(Self { msg, recipient })
-    }
-}
+// impl tls_codec::Deserialize for GroupMessage {
+//     fn tls_deserialize<R: std::io::Read>(bytes: &mut R) -> Result<Self, tls_codec::Error> {
+//         let msg = MlsMessageIn::tls_deserialize(bytes)?;
+//         let recipient = TlsByteVecU32::tls_deserialize(bytes)?;
+//         Ok(Self { msg, recipient })
+//     }
+// }

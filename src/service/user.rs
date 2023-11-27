@@ -1,8 +1,7 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::HashSet;
 
 use std::str::FromStr;
-use std::string;
 use std::{cell::RefCell, collections::HashMap, str};
 
 use openmls::prelude::*;
@@ -256,7 +255,7 @@ impl User {
 
     ///
     pub async fn register(&self) -> Result<String, String> {
-        return self.backend.register_client(self).await;
+        return self.backend.register_key_packages(self).await;
     }
 
     /// Get a list of clients in the group to send messages to.
@@ -664,8 +663,8 @@ impl User {
         let group = groups.get_mut(&group_name).unwrap(); // XXX: not cool.
 
         // convert group.group_id to bytes
-        let msg = GroupMessage::new(out_messages.into(), group.group_id.as_bytes().into());
-        self.backend.send_msg(&msg).await?;
+        let msg = GroupMessage::new(out_messages.into(), &group.group_id);
+        self.backend.send_msg(&msg, &self.user_id).await?;
 
         // Second, process the invitation on our end.
         group
@@ -677,7 +676,7 @@ impl User {
         // Finally, send Welcome to the joiner.
         log::trace!("Sending welcome");
         self.backend
-            .send_welcome(&welcome)
+            .send_welcome(&welcome, &self.user_id, &user_id)
             .await
             .expect("Error sending Welcome message");
 
@@ -716,8 +715,8 @@ impl User {
         log::trace!("Sending commit");
         let group = groups.get_mut(&group_name).unwrap(); // XXX: not cool.
 
-        let msg = GroupMessage::new(remove_message.into(), group.group_id.as_bytes().into());
-        self.backend.send_msg(&msg).await?;
+        let msg = GroupMessage::new(remove_message.into(), &group.group_id);
+        self.backend.send_msg(&msg, &self.user_id).await?;
 
         // Second, process the removal on our end.
         group
@@ -792,8 +791,8 @@ impl User {
         // First, send the MlsMessage remove commit to the group.
         log::trace!("Sending commit");
 
-        let msg = GroupMessage::new(queued_message.into(), group.group_id.as_bytes().into());
-        self.backend.send_msg(&msg).await?;
+        let msg = GroupMessage::new(queued_message.into(), &group.group_id);
+        self.backend.send_msg(&msg, &self.user_id).await?;
 
         // Second, process the removal on our end.
         group
