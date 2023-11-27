@@ -608,10 +608,7 @@ impl User {
 
     /// Check if the user with the given name can be invited to the group.
     pub async fn can_invite(&self, user_id: &str) -> bool {
-        self.backend
-            .consume_key_package(user_id.as_bytes())
-            .await
-            .is_ok()
+        self.backend.consume_key_package(user_id).await.is_ok()
     }
 
     /// Invite user with the given name to the group.
@@ -627,11 +624,7 @@ impl User {
         // };
 
         // Reclaim a key package from the server
-        let joiner_key_package = self
-            .backend
-            .consume_key_package(&user_id.as_bytes())
-            .await
-            .unwrap();
+        let joiner_key_package = self.backend.consume_key_package(&user_id).await.unwrap();
 
         // Build a proposal with this key package and do the MLS bits.
         let mut groups = self.groups.borrow_mut();

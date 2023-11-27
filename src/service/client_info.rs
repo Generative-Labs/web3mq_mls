@@ -35,6 +35,21 @@ pub struct RegisterKeyPackageParams {
     pub web3mq_user_signature: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct KeyPackagesResult {
+    pub(crate) userid: String,
+    pub(crate) timestamp: u128,
+    pub(crate) web3mq_user_signature: String,
+    pub(crate) key_packages: HashMap<String, String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct Response<Data> {
+    pub(crate) code: u32,
+    pub(crate) msg: String,
+    pub(crate) data: Data,
+}
+
 #[derive(
     Debug,
     Default,

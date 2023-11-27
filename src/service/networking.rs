@@ -85,7 +85,7 @@ impl NetworkingConfig {
     }
 }
 
-pub async fn ed25519_sign(private_key: &str, sign_content: &str) -> Result<String, String> {
+pub fn ed25519_sign(private_key: &str, sign_content: &str) -> Result<String, String> {
     // private_key is hex encoded, should convert it to bytes
     let private_key_bytes = hex::decode(private_key).map_err(|_| "Failed to decode private key")?;
     let private_key_bytes: &[u8; 32] = private_key_bytes
