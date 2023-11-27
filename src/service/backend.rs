@@ -42,19 +42,10 @@ impl Backend {
     pub async fn register_client(&self, user: &User) -> Result<String, String> {
         let mut url = self.ds_url.clone();
         url.set_path("/api/user/key_package/");
-        let key_packages = user.key_packages();
-        // convert key_packages to HashMap<String, String> 其中 String 是 base64_encode(key_package)
-        let mut key_package_map = HashMap::new();
-        for (key, value) in key_packages {
-            key_package_map.insert(
-                base64::encode_config(key, base64::URL_SAFE),
-                base64::encode_config(value.tls_serialize_detached().unwrap(), base64::URL_SAFE),
-            );
-        }
+        let key_packages = user.key_packages_map();
 
         let private_key = NetworkingConfig::instance().get_private_key();
-        let json_string =
-            serde_json::to_string(&key_package_map.clone()).expect("Error serializing");
+        let json_string = serde_json::to_string(&key_packages.clone()).expect("Error serializing");
         let body = base64::encode(json_string);
 
         let (signature, payload_hash, timestamp) =
@@ -63,7 +54,7 @@ impl Backend {
         let client_info = RegisterKeyPackageParams {
             userid: user.user_id.clone(),
             timestamp,
-            key_packages: key_package_map.clone(),
+            key_packages: key_packages.clone(),
             payload_hash: payload_hash,
             web3mq_user_signature: signature,
         };

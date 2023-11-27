@@ -2,6 +2,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
 
 use std::str::FromStr;
+use std::string;
 use std::{cell::RefCell, collections::HashMap, str};
 
 use openmls::prelude::*;
@@ -238,6 +239,19 @@ impl User {
         // clone first !
         let kpgs = self.identity.borrow().kp.clone();
         Vec::from_iter(kpgs)
+    }
+
+    /// Get the key packages fo this user.
+    pub(crate) fn key_packages_map(&self) -> HashMap<String, String> {
+        let key_packages = self.key_packages();
+        let mut key_package_map = HashMap::new();
+        for (key, value) in key_packages {
+            key_package_map.insert(
+                base64::encode_config(key, base64::URL_SAFE),
+                base64::encode_config(value.tls_serialize_detached().unwrap(), base64::URL_SAFE),
+            );
+        }
+        return key_package_map;
     }
 
     ///
