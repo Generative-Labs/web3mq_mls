@@ -58,9 +58,9 @@ pub async fn create_group(user_id: String, group_id: String) -> Result<String, S
 }
 
 #[wasm_bindgen]
-pub async fn sync_mls_state(user_id: String) -> Result<(), String> {
+pub async fn sync_mls_state(user_id: String, group_ids: Vec<String>) -> Result<(), String> {
     let mut user = User::load(user_id.clone()).await?;
-    let _ = user.update().await?;
+    let _ = user.update(group_ids).await?;
     Ok(())
 }
 
@@ -110,7 +110,7 @@ pub async fn handle_mls_group_event(user_id: String, msg_bytes: Vec<u8>) -> Resu
     let mut user = User::load(user_id.clone()).await?;
     let msg =
         MlsMessageIn::tls_deserialize(&mut msg_bytes.as_slice()).map_err(|e| e.to_string())?;
-    return user.handle_mls_group_event(msg);
+    return user.handle_mls_group_event(msg).await;
 }
 
 #[cfg(test)]

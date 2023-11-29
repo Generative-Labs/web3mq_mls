@@ -4,6 +4,7 @@ use openmls::prelude::*;
 use tls_codec::{
     TlsByteSliceU16, TlsByteVecU16, TlsByteVecU8, TlsDeserialize, TlsSerialize, TlsSize, TlsVecU32,
 };
+use wasm_bindgen_futures::js_sys::Array;
 
 #[derive(Debug, Default, Clone)]
 pub struct ClientInfo {
@@ -42,6 +43,22 @@ pub struct SendMessageParams {
     pub payload_hash: String,
     pub mls_msg: String,
     pub recipients_topic_id: String,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StatesRequestParams {
+    pub(crate) userid: String,
+    pub(crate) timestamp: u128,
+    pub(crate) web3mq_user_signature: String,
+    pub(crate) payload_hash: String,
+    pub(crate) groupid_list: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StatesRequestResult {
+    pub(crate) userid: String,
+    pub(crate) timestamp: u128,
+    pub(crate) mls_states: HashMap<String, Vec<String>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

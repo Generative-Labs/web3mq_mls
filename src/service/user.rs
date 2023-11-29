@@ -1,10 +1,11 @@
 use std::borrow::BorrowMut;
 use std::collections::HashSet;
 use std::str::FromStr;
+use std::string;
 use std::{cell::RefCell, collections::HashMap, str};
 
-use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
+use openmls::{messages, prelude::*};
 use openmls_traits::OpenMlsProvider;
 use rexie::{Rexie, TransactionMode};
 use tls_codec::TlsByteVecU8;
@@ -34,11 +35,6 @@ pub struct Group {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct User {
     pub(crate) user_id: String,
-    // #[serde(
-    //     serialize_with = "serialize_any_hashmap::serialize_hashmap",
-    //     deserialize_with = "serialize_any_hashmap::deserialize_hashmap"
-    // )]
-    // pub(crate) contacts: HashMap<Vec<u8>, Contact>,
     pub(crate) groups: RefCell<HashMap<String, Group>>,
     group_list: HashSet<String>,
     pub(crate) identity: RefCell<Identity>,
@@ -47,6 +43,8 @@ pub struct User {
     #[serde(skip)]
     crypto: OpenMlsRustPersistentCrypto,
     autosave_enabled: bool,
+    /// Timestamps of the last mls sync.
+    pub(crate) mls_sync_timestamp: RefCell<u128>,
 }
 
 #[derive(PartialEq)]
@@ -67,6 +65,7 @@ impl User {
             backend: Backend::default(),
             crypto,
             autosave_enabled: false,
+            mls_sync_timestamp: RefCell::new(0),
         };
         return out;
     }
@@ -114,12 +113,12 @@ impl User {
                             let groups = user.groups.get_mut();
                             for group_name in &user.group_list {
                                 let group = groups.get_mut(group_name).unwrap();
-                                let mlsgroup = MlsGroup::load(
+                                let mls_group = MlsGroup::load(
                                     &GroupId::from_slice(group_name.as_bytes()),
                                     user.crypto.key_store(),
                                 );
                                 let grp = Group {
-                                    mls_group: RefCell::new(mlsgroup.unwrap()),
+                                    mls_group: RefCell::new(mls_group.unwrap()),
                                     group_id: group_name.clone(),
                                     conversation: group.conversation.clone(),
                                 };
@@ -456,41 +455,45 @@ impl User {
     /// Update the user. This involves:
     /// * retrieving all new messages from the server
     /// * update the contacts with all other clients known to the server
-    pub async fn update(&mut self) -> Result<String, String> {
+    pub async fn update(&mut self, groups: Vec<String>) -> Result<String, String> {
         log::debug!("Updating {} ...", self.user_id);
         log::debug!("update::Processing messages for {} ", self.user_id);
         // Go through the list of messages and process or store them.
-        for message in self.backend.recv_msgs(self).await?.drain(..) {
+        for message in self.backend.recv_msgs(self, groups).await?.drain(..) {
             log::debug!("Reading message format {:#?} ...", message.wire_format());
-            self.handle_mls_group_event(message)?;
+            self.handle_mls_group_event(message).await?;
         }
 
         log::debug!("update::Processing messages done");
-
-        // self.update_clients().await;
 
         self.autosave().await;
 
         Ok("success".to_string())
     }
 
-    pub fn handle_mls_group_event(&mut self, message: MlsMessageIn) -> Result<(), String> {
+    pub async fn handle_mls_group_event(&mut self, message: MlsMessageIn) -> Result<(), String> {
         match message.extract() {
             MlsMessageInBody::Welcome(welcome) => {
                 // Join the group. (Later we should ask the user to
                 // approve first ...)
-                self.join_group(welcome)?;
+                self.join_group(welcome).await?;
             }
             MlsMessageInBody::PrivateMessage(message) => {
-                match self.process_protocol_message(message.into()) {
+                match self.process_protocol_message(message.into()).await {
                     Ok(p) => {
                         if p.0 == PostUpdateActions::Remove {
                             match p.1 {
                                 Some(gid) => {
-                                    let mut grps = self.groups.borrow_mut();
-                                    grps.remove_entry(str::from_utf8(gid.as_slice()).unwrap());
-                                    self.group_list
-                                        .remove(str::from_utf8(gid.as_slice()).unwrap());
+                                    let group_id = str::from_utf8(gid.as_slice()).unwrap();
+                                    let group_id_to_remove = group_id.clone();
+                                    {
+                                        let mut grps: std::cell::RefMut<
+                                            '_,
+                                            HashMap<String, Group>,
+                                        > = self.groups.borrow_mut();
+                                        grps.remove_entry(group_id_to_remove);
+                                    }
+                                    self.group_list.remove(group_id_to_remove);
                                 }
                                 None => log::debug!(
                                     "update::Error post update remove must have a group id"
@@ -502,7 +505,7 @@ impl User {
                 };
             }
             MlsMessageInBody::PublicMessage(message) => {
-                if self.process_protocol_message(message.into()).is_err() {}
+                if self.process_protocol_message(message.into()).await.is_err() {}
             }
             _ => panic!("Unsupported message type"),
         }
@@ -510,72 +513,76 @@ impl User {
         Ok(())
     }
 
-    fn process_protocol_message(
-        &self,
+    async fn process_protocol_message(
+        &mut self,
         message: ProtocolMessage,
     ) -> Result<(PostUpdateActions, Option<GroupId>), String> {
-        let processed_message: ProcessedMessage;
-        let mut groups = self.groups.borrow_mut();
-
-        let group = match groups
-            .borrow_mut()
-            .get_mut(str::from_utf8(message.group_id().as_slice()).unwrap())
+        let message_cloned = message.clone();
+        let group_id_clone = str::from_utf8(message_cloned.group_id().as_slice()).unwrap();
         {
-            Some(g) => g,
-            None => {
-                log::error!(
-                    "Error getting group {:?} for a message. Dropping message.",
-                    message.group_id()
-                );
-                return Err("error".to_string());
-            }
-        };
+            let processed_message: ProcessedMessage;
 
-        let mut mls_group = group.mls_group.borrow_mut();
-        processed_message = match mls_group.process_message(&self.crypto, message) {
-            Ok(msg) => msg,
-            Err(e) => {
-                log::error!(
-                    "Error processing unverified message: {:?} -  Dropping message.",
-                    e
-                );
-                return Err("error".to_string());
-            }
-        };
+            let mut groups = self.groups.borrow_mut();
 
-        match processed_message.into_content() {
-            ProcessedMessageContent::ApplicationMessage(_) => {
-                // intentionally left blank.
-            }
-            ProcessedMessageContent::ProposalMessage(_proposal_ptr) => {
-                // intentionally left blank.
-            }
-            ProcessedMessageContent::ExternalJoinProposalMessage(_external_proposal_ptr) => {
-                // intentionally left blank.
-            }
-            ProcessedMessageContent::StagedCommitMessage(commit_ptr) => {
-                let mut remove_proposal: bool = false;
-                if commit_ptr.self_removed() {
-                    remove_proposal = true;
+            let group = match groups.borrow_mut().get_mut(group_id_clone) {
+                Some(g) => g,
+                None => {
+                    log::error!(
+                        "Error getting group {:?} for a message. Dropping message.",
+                        message.group_id()
+                    );
+                    return Err("error".to_string());
                 }
-                match mls_group.merge_staged_commit(&self.crypto, *commit_ptr) {
-                    Ok(()) => {
-                        if remove_proposal {
-                            log::debug!(
+            };
+            let mut mls_group = group.mls_group.borrow_mut();
+            processed_message = match mls_group.process_message(&self.crypto, message) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    log::error!(
+                        "Error processing unverified message: {:?} -  Dropping message.",
+                        e
+                    );
+                    return Err("error".to_string());
+                }
+            };
+
+            match processed_message.into_content() {
+                ProcessedMessageContent::ApplicationMessage(_) => {
+                    // intentionally left blank.
+                }
+                ProcessedMessageContent::ProposalMessage(_proposal_ptr) => {
+                    // intentionally left blank.
+                }
+                ProcessedMessageContent::ExternalJoinProposalMessage(_external_proposal_ptr) => {
+                    // intentionally left blank.
+                }
+                ProcessedMessageContent::StagedCommitMessage(commit_ptr) => {
+                    let mut remove_proposal: bool = false;
+                    if commit_ptr.self_removed() {
+                        remove_proposal = true;
+                    }
+                    match mls_group.merge_staged_commit(&self.crypto, *commit_ptr) {
+                        Ok(()) => {
+                            if remove_proposal {
+                                log::debug!(
                                 "update::Processing StagedCommitMessage removing {} from group {} ",
                                 self.user_id,
                                 group.group_id
                             );
-                            return Ok((
-                                PostUpdateActions::Remove,
-                                Some(mls_group.group_id().clone()),
-                            ));
+                                return Ok((
+                                    PostUpdateActions::Remove,
+                                    Some(mls_group.group_id().clone()),
+                                ));
+                            }
                         }
+                        Err(e) => return Err(e.to_string()),
                     }
-                    Err(e) => return Err(e.to_string()),
                 }
             }
         }
+
+        self.update_group_sync_timestamp().await;
+
         Ok((PostUpdateActions::None, None))
     }
 
@@ -734,16 +741,18 @@ impl User {
     }
 
     /// Join a group with the provided welcome message.
-    fn join_group(&self, welcome: Welcome) -> Result<(), String> {
+    async fn join_group(&mut self, welcome: Welcome) -> Result<(), String> {
         log::debug!("{} joining group ...", self.user_id);
-
-        let mut ident = self.identity.borrow_mut();
-        for secret in welcome.secrets().iter() {
-            let key_package_hash = &secret.new_member();
-            if ident.kp.contains_key(key_package_hash.as_slice()) {
-                ident.kp.remove(key_package_hash.as_slice());
+        {
+            let mut ident = self.identity.borrow_mut();
+            for secret in welcome.secrets().iter() {
+                let key_package_hash = &secret.new_member();
+                if ident.kp.contains_key(key_package_hash.as_slice()) {
+                    ident.kp.remove(key_package_hash.as_slice());
+                }
             }
         }
+
         // NOTE: Since the DS currently doesn't distribute copies of the group's ratchet
         // tree, we need to include the ratchet_tree_extension.
         let group_config = MlsGroupConfig::builder()
@@ -753,6 +762,7 @@ impl User {
             .expect("Failed to create MlsGroup");
 
         let group_id = mls_group.group_id().to_vec();
+
         // XXX: Use Welcome's encrypted_group_info field to store group_name.
         let group_name = String::from_utf8(group_id.clone()).unwrap();
         let group_aad = group_name.clone() + " AAD";
@@ -765,12 +775,13 @@ impl User {
             mls_group: RefCell::new(mls_group),
         };
 
-        log::trace!(" {}", group_name);
-
-        match self.groups.borrow_mut().insert(group_name, group) {
+        let result = match self.groups.borrow_mut().insert(group_name, group) {
             Some(old) => Err(format!("Overrode the group {:?}", old.group_id)),
             None => Ok(()),
-        }
+        };
+        self.autosave().await;
+
+        return result;
     }
 
     /// Leave a group.
@@ -809,7 +820,18 @@ impl User {
         Ok(())
     }
 
+    ///
     pub fn reset_ds_url(&mut self, ds_url: &str) {
         self.backend.reset_ds_url(ds_url);
+    }
+
+    ///
+    pub async fn update_group_sync_timestamp(&mut self) {
+        let timestamp = instant::SystemTime::now()
+            .duration_since(instant::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        *self.mls_sync_timestamp.borrow_mut() = timestamp;
+        self.autosave().await;
     }
 }

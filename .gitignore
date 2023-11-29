@@ -21,3 +21,6 @@ Cargo.lock
 
 # Jetbrains
 .idea
+
+# node.js
+node_modules/

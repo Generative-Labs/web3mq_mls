@@ -10,18 +10,13 @@
       import init, {
         greet,
         setup_networking_config,
-        get_base_url,
+        initial_user,
       } from "./pkg/web3mq_mls.js";
+
       init().then(async () => {
         console.log("init success");
-        setup_networking_config(
-          "https://web3mq.com/",
-          "pubkey",
-          "did_key",
-          "private_key"
-        );
+        await initial_user("Alice");
 
-        // await initial_user("Alice");
         // 1. get the user
         // try {
         //     let loadedUser = User.load("user_id");

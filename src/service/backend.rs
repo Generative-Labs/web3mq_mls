@@ -9,12 +9,18 @@ use crate::service::client_info::{ClientKeyPackages, GroupMessage};
 use crate::service::user::User;
 
 use super::client_info::{
-    KeyPackagesResult, RegisterKeyPackageParams, Response, SendMessageParams,
+    KeyPackagesResult, RegisterKeyPackageParams, Response, SendMessageParams, StatesRequestParams,
+    StatesRequestResult,
 };
 use super::networking::{ed25519_sign, get, post, NetworkingConfig, _post};
 
 trait RequestSigner {
-    fn sign_request(user_id: &str, body: &str, private_key: &str) -> (String, String, u128);
+    fn sign_request(
+        user_id: &str,
+        body: &str,
+        private_key: &str,
+        timestamp: Option<u128>,
+    ) -> (String, String, u128);
     fn get_payload_hash(user_id: &str, body: &str, timestamp: u128) -> String;
 }
 
@@ -24,12 +30,20 @@ pub struct Backend {
 
 impl RequestSigner for Backend {
     ///
-    fn sign_request(user_id: &str, body: &str, private_key: &str) -> (String, String, u128) {
-        let now = instant::SystemTime::now();
-        let timestamp = now
-            .duration_since(instant::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+    fn sign_request(
+        user_id: &str,
+        body: &str,
+        private_key: &str,
+        timestamp: Option<u128>,
+    ) -> (String, String, u128) {
+        // if timestamp is None, then use current timestamp
+        let timestamp = timestamp.unwrap_or_else(|| {
+            let now = instant::SystemTime::now();
+            now.duration_since(instant::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        });
+
         let payload_hash = Backend::get_payload_hash(user_id, body, timestamp);
 
         // ed25519 encrypt
@@ -61,7 +75,7 @@ impl Backend {
         let body = base64::encode_config(json_string, base64::URL_SAFE);
 
         let (signature, payload_hash, timestamp) =
-            Backend::sign_request(&user.user_id, &body, &private_key);
+            Backend::sign_request(&user.user_id, &body, &private_key, None);
 
         let client_info = RegisterKeyPackageParams {
             userid: user.user_id.clone(),
@@ -142,7 +156,7 @@ impl Backend {
         let private_key = NetworkingConfig::instance().get_private_key();
 
         let (signature, payload_hash, timestamp) =
-            Backend::sign_request(sender, &body, &private_key);
+            Backend::sign_request(sender, &body, &private_key, None);
 
         let msg_params = SendMessageParams {
             userid: sender.to_string(),
@@ -172,7 +186,7 @@ impl Backend {
         let private_key = NetworkingConfig::instance().get_private_key();
 
         let (signature, payload_hash, timestamp) =
-            Backend::sign_request(sender, &body, &private_key);
+            Backend::sign_request(sender, &body, &private_key, None);
 
         let msg_params = SendMessageParams {
             userid: sender.to_string(),
@@ -189,18 +203,50 @@ impl Backend {
     }
 
     /// Get a list of all new messages for the user.
-    pub async fn recv_msgs(&self, user: &User) -> Result<Vec<MlsMessageIn>, String> {
+    pub async fn recv_msgs(
+        &self,
+        user: &User,
+        groups: Vec<String>,
+    ) -> Result<Vec<MlsMessageIn>, String> {
         let mut url = self.ds_url.clone();
-        // TODO: Parameters are subject to change.
-        let path = "/api/group/mls_state/".to_string()
-            + &base64::encode_config(user.identity.borrow().identity(), base64::URL_SAFE);
+        let path = "/api/group/mls_state/".to_string();
         url.set_path(&path);
 
-        let response = get(&url).await?;
-        match TlsVecU16::<MlsMessageIn>::tls_deserialize(&mut response.as_slice()) {
-            Ok(r) => Ok(r.into()),
-            Err(e) => Err(format!("Invalid message list: {e:?}")),
+        let private_key = NetworkingConfig::instance().get_private_key();
+        let groups_json = serde_json::to_string(&groups).unwrap();
+        let body = base64::encode_config(groups_json, base64::URL_SAFE);
+        let (signature, payload_hash, timestamp) = Backend::sign_request(
+            &user.user_id,
+            &body,
+            &private_key,
+            Option::Some(*user.mls_sync_timestamp.borrow()),
+        );
+
+        let msg_params = StatesRequestParams {
+            userid: user.user_id.to_string(),
+            timestamp: timestamp,
+            web3mq_user_signature: signature,
+            payload_hash: payload_hash,
+            groupid_list: groups,
+        };
+
+        let response = _post(&url, &msg_params).await?;
+        let response: Response<StatesRequestResult> = from_slice(&response)
+            .map_err(|e| format!("Error decoding server response: {:?}", e))?;
+
+        // get the MlsMessageIn from every response.data.mls_states.value
+        // flat all response.data.mls_states.values
+        let mut results: Vec<MlsMessageIn> = Vec::with_capacity(response.data.mls_states.len());
+
+        for v in response.data.mls_states.values() {
+            for value in v {
+                let response = base64::decode_config(value, base64::URL_SAFE).unwrap();
+                let msg = MlsMessageIn::tls_deserialize(&mut response.as_slice()).unwrap();
+                results.push(msg);
+            }
         }
+
+        Ok(results)
     }
 
     pub fn reset_ds_url(&mut self, ds_url: &str) {
