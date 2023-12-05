@@ -1,10 +1,8 @@
-use std::{collections::HashMap, sync::Mutex};
-
-use base64;
 use ed25519_dalek::{Signer, SigningKey};
 use lazy_static::lazy_static;
 use reqwest::{header::HeaderMap, Client, StatusCode};
 use serde_json::Value;
+use std::{collections::HashMap, sync::Mutex};
 use tls_codec::Serialize;
 use url::Url;
 
@@ -33,6 +31,10 @@ impl NetworkingConfig {
 impl NetworkingConfig {
     pub fn set_base_url(&self, value: String) {
         *self.base_url.lock().unwrap() = value;
+    }
+
+    pub fn get_base_url(&self) -> String {
+        self.base_url.lock().unwrap().to_string()
     }
 
     pub fn set_did_key(&self, value: String) {
@@ -78,7 +80,7 @@ impl NetworkingConfig {
             "web3mq-request-pubkey",
             self.pubkey.lock().unwrap().parse().unwrap(),
         );
-        headers.insert("didkey", self.did_key.lock().unwrap().parse().unwrap());
+        headers.insert("didKey", self.did_key.lock().unwrap().parse().unwrap());
         headers
     }
 }
@@ -92,7 +94,7 @@ pub fn ed25519_sign(private_key: &str, sign_content: &str) -> Result<String, Str
         .map_err(|_| "Invalid private key length")?;
     let key_pair = SigningKey::from_bytes(private_key_bytes);
     let signature = key_pair.sign(sign_content.as_bytes());
-    Ok(hex::encode(signature.to_bytes()))
+    Ok(base64::encode(signature.to_bytes()))
 }
 
 pub async fn post(url: &Url, msg: &impl Serialize) -> Result<Vec<u8>, String> {

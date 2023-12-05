@@ -73,12 +73,9 @@ impl PersistentKeyStore {
             );
         }
 
-        let database = index_db_helper::build_database(
-            user_id.clone(),
-            index_db_helper::DatabaseType::KeyStore,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let database = index_db_helper::build_database(&user_id)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let transaction = database
             .transaction(
@@ -110,12 +107,9 @@ impl PersistentKeyStore {
     async fn load_from_file(&mut self, user_id: String) -> Result<(), String> {
         // Read the JSON contents of the file as an instance of `SerializableKeyStore`.
 
-        let database = index_db_helper::build_database(
-            user_id.clone(),
-            index_db_helper::DatabaseType::KeyStore,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let database = index_db_helper::build_database(&user_id)
+            .await
+            .map_err(|e| e.to_string())?;
         let transaction = database
             .transaction(
                 &[DatabaseType::KeyStore.store_name()],

@@ -15,11 +15,11 @@ impl Conversation {
     pub fn add(
         &mut self,
         conversation_message: ConversationMessage,
-        crypted_string: Option<String>,
+        encrypted_string: Option<&str>,
     ) {
-        if crypted_string.is_some() {
+        if encrypted_string.is_some() {
             self.messages_self.insert(
-                crypted_string.unwrap(),
+                encrypted_string.unwrap().to_string(),
                 conversation_message.clone().message,
             );
         }
@@ -27,8 +27,8 @@ impl Conversation {
     }
 
     ///
-    pub fn get_self_message(&self, crypted_string: String) -> Option<String> {
-        self.messages_self.get(&crypted_string).cloned()
+    pub fn get_cached_message(&self, encrypted_string: &str) -> Option<String> {
+        self.messages_self.get(encrypted_string).cloned()
     }
 
     ///

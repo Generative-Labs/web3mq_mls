@@ -55,10 +55,10 @@ pub enum PostUpdateActions {
 
 impl User {
     /// Create a new user with the given name and a fresh set of credentials.
-    pub fn new(user_id: String) -> Self {
+    pub fn new(user_id: &str) -> Self {
         let crypto = OpenMlsRustPersistentCrypto::default();
         let out = Self {
-            user_id: user_id.clone(),
+            user_id: user_id.to_string(),
             groups: RefCell::new(HashMap::new()),
             group_list: HashSet::new(),
             identity: RefCell::new(Identity::new(CIPHERSUITE, &crypto, user_id.as_bytes())),
@@ -75,7 +75,7 @@ impl User {
         self.groups.borrow().keys().cloned().collect()
     }
 
-    async fn load_from_file(database: &Rexie, user_id: String) -> Result<User, String> {
+    async fn load_from_file(database: &Rexie, user_id: &str) -> Result<User, String> {
         let transaction = database
             .transaction(
                 &[DatabaseType::User.store_name()],
@@ -87,7 +87,7 @@ impl User {
             .store(DatabaseType::User.store_name().as_str())
             .map_err(|e| e.to_string())?;
 
-        let key = serde_wasm_bindgen::to_value(&user_id.clone()).unwrap();
+        let key = serde_wasm_bindgen::to_value(&user_id).unwrap();
         let user_value = store.get(&key).await.map_err(|e| e.to_string())?;
         let serializable_user: Option<User> = serde_wasm_bindgen::from_value(user_value).unwrap();
         match serializable_user {
@@ -97,18 +97,18 @@ impl User {
     }
 
     ///
-    pub async fn load(user_id: String) -> Result<User, String> {
-        let database = index_db_helper::build_database(user_id.clone(), DatabaseType::User).await;
+    pub async fn load(user_id: &str) -> Result<User, String> {
+        let database = index_db_helper::build_database(user_id).await;
         match database {
             Err(e) => {
                 log::error!("Error loading user state: {:?}", e.to_string());
                 Err(e.to_string())
             }
             Ok(database) => {
-                let user_result = User::load_from_file(&database, user_id.clone()).await;
+                let user_result = User::load_from_file(&database, user_id).await;
                 if user_result.is_ok() {
                     let mut user = user_result.ok().unwrap();
-                    match user.crypto.load_keystore(user_id).await {
+                    match user.crypto.load_keystore(user_id.to_string()).await {
                         Ok(_) => {
                             let groups = user.groups.get_mut();
                             for group_name in &user.group_list {
@@ -136,7 +136,7 @@ impl User {
     }
 
     async fn save_to_file(&self) {
-        let database = index_db_helper::build_database(self.user_id.clone(), DatabaseType::User)
+        let database = index_db_helper::build_database(&self.user_id)
             .await
             .expect("Error building database");
 
@@ -321,10 +321,10 @@ impl User {
     }
 
     /// Send an application message to the group.
-    pub async fn send_msg(&mut self, msg: &str, group_id: String) -> Result<String, String> {
+    pub async fn send_msg(&mut self, msg: &str, group_id: &str) -> Result<String, String> {
         let mut groups = self.groups.borrow_mut();
 
-        let group = match groups.get_mut(&group_id) {
+        let group = match groups.get_mut(group_id) {
             Some(g) => g,
             None => return Err("Unknown group".to_string()),
         };
@@ -345,7 +345,7 @@ impl User {
         group
             .conversation
             .borrow_mut()
-            .add(conversation_message, Some(msg_to_ds.clone()));
+            .add(conversation_message, Some(&msg_to_ds.clone()));
 
         drop(groups);
         self.autosave().await;
@@ -364,50 +364,91 @@ impl User {
     }
 
     /// Reads the message, content should be hex encoded.
-    pub fn read_msg(
-        &self,
-        content: String,
-        sender: String,
-        group_id: String,
-    ) -> Result<String, String> {
-        if sender == self.user_id {
-            // find the message in the conversation.messages
-            let message = self
-                .groups
-                .borrow()
-                .get(&group_id)
-                .unwrap()
-                .conversation
-                .get_self_message(content)
-                .expect("Error reading message");
-            Ok(message)
-        } else {
-            // hex to bytes
-            let msg_bytes = hex_to_bytes(&content);
-            let mls_message = MlsMessageIn::tls_deserialize_exact(msg_bytes)
-                .expect("Could not deserialize message.");
-            let protocol_message: ProtocolMessage = mls_message.into();
-            // get the MlsGroup from groups
-            let processed_message = self
-                .groups
-                .borrow()
-                .get(&group_id)
-                .unwrap()
-                .mls_group
-                .borrow_mut()
-                .process_message(&self.crypto, protocol_message)
-                .expect("Could not process message.");
-            if let ProcessedMessageContent::ApplicationMessage(application_message) =
-                processed_message.into_content()
-            {
-                // bytes to string
-                let application_message =
-                    String::from_utf8(application_message.into_bytes()).unwrap();
-                Ok(application_message)
-            } else {
-                Err("Error processing unverified message".to_string())
-            }
+    pub fn read_msg(&self, content: &str, sender: &str, group_id: &str) -> Result<String, String> {
+        match self.groups.borrow_mut().get_mut(group_id) {
+            Some(group) => match group.conversation.get_cached_message(content) {
+                Some(message) => Ok(message),
+                None => {
+                    log::debug!("read_msg::Message not found in cache, trying to decrypt");
+                    let msg_bytes = hex_to_bytes(&content);
+                    let mls_message = MlsMessageIn::tls_deserialize_exact(msg_bytes)
+                        .map_err(|_| "Could not deserialize message.".to_string())?;
+                    let protocol_message: ProtocolMessage = mls_message.into();
+                    // get the MlsGroup from groups
+                    match group
+                        .mls_group
+                        .borrow_mut()
+                        .process_message(&self.crypto, protocol_message)
+                    {
+                        Ok(processed_message) => {
+                            if let ProcessedMessageContent::ApplicationMessage(
+                                application_message,
+                            ) = processed_message.into_content()
+                            {
+                                // bytes to string
+                                let result = String::from_utf8(application_message.into_bytes())
+                                    .map_err(|_| "Invalid UTF-8 sequence".to_string());
+                                // cache the result
+                                if result.is_ok() {
+                                    let conversation_message = ConversationMessage::new(
+                                        result.clone().unwrap(),
+                                        sender.to_string(),
+                                    );
+                                    group.conversation.add(conversation_message, Some(content));
+                                }
+                                return result;
+                            } else {
+                                Err("Error processing unverified message".to_string())
+                            }
+                        }
+                        Err(e) => Err(format!("Could not process message: {}", e)),
+                    }
+                }
+            },
+            None => Err("Group not found".to_string()),
         }
+
+        // if sender == self.user_id {
+        //     // find the message in the conversation.messages
+        //     match self.groups.borrow().get(&group_id) {
+        //         Some(group) => match group.conversation.get_cached_message(content) {
+        //             Some(message) => Ok(message),
+        //             None => Err("Error reading message".to_string()),
+        //         },
+        //         None => Err("Group not found".to_string()),
+        //     }
+        // } else {
+        //     // hex to bytes
+        //     let msg_bytes = hex_to_bytes(&content);
+        //     let mls_message = MlsMessageIn::tls_deserialize_exact(msg_bytes)
+        //         .map_err(|_| "Could not deserialize message.".to_string())?;
+        //     let protocol_message: ProtocolMessage = mls_message.into();
+        //     // get the MlsGroup from groups
+        //     match self.groups.borrow().get(&group_id) {
+        //         Some(group) => {
+        //             match group
+        //                 .mls_group
+        //                 .borrow_mut()
+        //                 .process_message(&self.crypto, protocol_message)
+        //             {
+        //                 Ok(processed_message) => {
+        //                     if let ProcessedMessageContent::ApplicationMessage(
+        //                         application_message,
+        //                     ) = processed_message.into_content()
+        //                     {
+        //                         // bytes to string
+        //                         String::from_utf8(application_message.into_bytes())
+        //                             .map_err(|_| "Invalid UTF-8 sequence".to_string())
+        //                     } else {
+        //                         Err("Error processing unverified message".to_string())
+        //                     }
+        //                 }
+        //                 Err(e) => Err(format!("Could not process message: {}", e)),
+        //             }
+        //         }
+        //         None => Err("Group not found".to_string()),
+        //     }
+        // }
     }
 
     // /// Update the user clients list.
@@ -455,20 +496,19 @@ impl User {
     /// Update the user. This involves:
     /// * retrieving all new messages from the server
     /// * update the contacts with all other clients known to the server
-    pub async fn update(&mut self, groups: Vec<String>) -> Result<String, String> {
+    pub async fn update(&mut self, groups: Vec<String>) -> Result<(), String> {
         log::debug!("Updating {} ...", self.user_id);
         log::debug!("update::Processing messages for {} ", self.user_id);
         // Go through the list of messages and process or store them.
         for message in self.backend.recv_msgs(self, groups).await?.drain(..) {
             log::debug!("Reading message format {:#?} ...", message.wire_format());
-            self.handle_mls_group_event(message).await?;
+            let _ = self.handle_mls_group_event(message).await;
         }
 
         log::debug!("update::Processing messages done");
-
         self.autosave().await;
 
-        Ok("success".to_string())
+        Ok(())
     }
 
     pub async fn handle_mls_group_event(&mut self, message: MlsMessageIn) -> Result<(), String> {
@@ -485,7 +525,7 @@ impl User {
                             match p.1 {
                                 Some(gid) => {
                                     let group_id = str::from_utf8(gid.as_slice()).unwrap();
-                                    let group_id_to_remove = group_id.clone();
+                                    let group_id_to_remove = group_id;
                                     {
                                         let mut grps: std::cell::RefMut<
                                             '_,
@@ -587,7 +627,7 @@ impl User {
     }
 
     /// Create a group with the given name.
-    pub async fn create_group(&mut self, group_id: String) -> Result<String, String> {
+    pub async fn create_group(&mut self, group_id: &str) -> Result<String, String> {
         log::debug!("{} creates group {}", self.user_id, group_id);
         let group_id_bytes = group_id.as_bytes();
         let mut group_aad = group_id_bytes.to_vec();
@@ -611,24 +651,23 @@ impl User {
         mls_group.set_aad(group_aad.as_slice());
 
         let group = Group {
-            group_id: group_id.clone(),
+            group_id: group_id.to_string(),
             conversation: Conversation::default(),
             mls_group: RefCell::new(mls_group),
         };
 
-        if self.groups.borrow().contains_key(&group_id) {
-            panic!("Group '{}' existed already", group_id.clone());
+        if self.groups.borrow().contains_key(group_id) {
+            panic!("Group '{}' existed already", group_id);
         }
 
-        self.groups.borrow_mut().insert(group_id.clone(), group);
+        self.groups.borrow_mut().insert(group_id.to_string(), group);
         self.autosave().await;
-        Ok(group_id.clone())
+        Ok(group_id.to_string())
     }
 
     /// Check if the user with the given name can be invited to the group.
     pub async fn can_invite(&self, user_id: &str) -> bool {
         let result = self.backend.consume_key_package(user_id).await;
-        print!("can_invite: {:?}", result);
         result.is_ok()
     }
 
@@ -636,7 +675,7 @@ impl User {
     pub async fn add_member_to_group(
         &mut self,
         user_id: &str,
-        group_name: String,
+        group_name: &str,
     ) -> Result<(), String> {
         // First we need to get the key package for {id} from the DS.
         // let contact = match self.contacts.values().find(|c| c.username == name) {
@@ -649,7 +688,7 @@ impl User {
 
         // Build a proposal with this key package and do the MLS bits.
         let mut groups = self.groups.borrow_mut();
-        let group = match groups.get_mut(&group_name) {
+        let group = match groups.get_mut(group_name) {
             Some(g) => g,
             None => return Err(format!("No group with name {group_name} known.")),
         };
@@ -668,11 +707,13 @@ impl User {
         This must be done before the member invitation is locally committed.
         It avoids the invited member to receive the commit message (which is in the previous group epoch).*/
         log::trace!("Sending commit");
-        let group = groups.get_mut(&group_name).unwrap(); // XXX: not cool.
+        let group = groups.get_mut(group_name).unwrap(); // XXX: not cool.
 
         // convert group.group_id to bytes
         let msg = GroupMessage::new(out_messages.into(), &group.group_id);
-        self.backend.send_msg(&msg, &self.user_id).await?;
+        self.backend
+            .send_msg(&msg, &self.user_id, &group_name)
+            .await?;
 
         // Second, process the invitation on our end.
         group
@@ -684,7 +725,7 @@ impl User {
         // Finally, send Welcome to the joiner.
         log::trace!("Sending welcome");
         self.backend
-            .send_welcome(&welcome, &self.user_id, &user_id)
+            .send_welcome(&welcome, &self.user_id, &user_id, &group_name)
             .await
             .expect("Error sending Welcome message");
 
@@ -724,7 +765,9 @@ impl User {
         let group = groups.get_mut(&group_name).unwrap(); // XXX: not cool.
 
         let msg = GroupMessage::new(remove_message.into(), &group.group_id);
-        self.backend.send_msg(&msg, &self.user_id).await?;
+        self.backend
+            .send_msg(&msg, &self.user_id, &group_name)
+            .await?;
 
         // Second, process the removal on our end.
         group
@@ -759,8 +802,7 @@ impl User {
             .use_ratchet_tree_extension(true)
             .build();
         let mut mls_group = MlsGroup::new_from_welcome(&self.crypto, &group_config, welcome, None)
-            .expect("Failed to create MlsGroup");
-
+            .map_err(|e| e.to_string())?;
         let group_id = mls_group.group_id().to_vec();
 
         // XXX: Use Welcome's encrypted_group_info field to store group_name.
@@ -779,6 +821,10 @@ impl User {
             Some(old) => Err(format!("Overrode the group {:?}", old.group_id)),
             None => Ok(()),
         };
+
+        let _ = self.add_key_package();
+        self.register().await?;
+
         self.autosave().await;
 
         return result;
@@ -804,7 +850,9 @@ impl User {
         log::trace!("Sending commit");
 
         let msg = GroupMessage::new(queued_message.into(), &group.group_id);
-        self.backend.send_msg(&msg, &self.user_id).await?;
+        self.backend
+            .send_msg(&msg, &self.user_id, &group_id)
+            .await?;
 
         // Second, process the removal on our end.
         group

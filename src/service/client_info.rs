@@ -42,7 +42,8 @@ pub struct SendMessageParams {
     pub web3mq_user_signature: String,
     pub payload_hash: String,
     pub mls_msg: String,
-    pub recipients_topic_id: String,
+    pub groupid: String,
+    pub recipients_topicid: String,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -52,13 +53,19 @@ pub(crate) struct StatesRequestParams {
     pub(crate) web3mq_user_signature: String,
     pub(crate) payload_hash: String,
     pub(crate) groupid_list: Vec<String>,
+    pub(crate) timestamp_gte: u128,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StatesRequestResult {
     pub(crate) userid: String,
-    pub(crate) timestamp: u128,
     pub(crate) mls_states: HashMap<String, Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct QueryKeyPackagesParam {
+    pub(crate) target_userid: String,
+    pub(crate) timestamp: u128,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

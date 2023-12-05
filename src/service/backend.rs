@@ -2,10 +2,10 @@ use openmls::prelude::*;
 use serde_json::from_slice;
 use sha2::{Digest, Sha256};
 
-use tls_codec::{Deserialize, TlsVecU16};
+use tls_codec::Deserialize;
 use url::Url;
 
-use crate::service::client_info::{ClientKeyPackages, GroupMessage};
+use crate::service::client_info::{ClientKeyPackages, GroupMessage, QueryKeyPackagesParam};
 use crate::service::user::User;
 
 use super::client_info::{
@@ -29,7 +29,6 @@ pub struct Backend {
 }
 
 impl RequestSigner for Backend {
-    ///
     fn sign_request(
         user_id: &str,
         body: &str,
@@ -43,17 +42,13 @@ impl RequestSigner for Backend {
                 .unwrap()
                 .as_millis()
         });
-
         let payload_hash = Backend::get_payload_hash(user_id, body, timestamp);
-
         // ed25519 encrypt
         let signature = ed25519_sign(&private_key, &payload_hash).expect("Error signing");
         return (signature, payload_hash, timestamp);
     }
 
     fn get_payload_hash(user_id: &str, body: &str, timestamp: u128) -> String {
-        // convert a hash map key_package to bytes
-        // let json_string = serde_json::to_string(&key_package).expect("Error serializing");
         let content = format!("{}{}{}", user_id, body, timestamp);
         // sha256 hash
         return Sha256::digest(content.as_bytes())
@@ -72,7 +67,7 @@ impl Backend {
 
         let private_key = NetworkingConfig::instance().get_private_key();
         let json_string = serde_json::to_string(&key_packages.clone()).expect("Error serializing");
-        let body = base64::encode_config(json_string, base64::URL_SAFE);
+        let body = json_string;
 
         let (signature, payload_hash, timestamp) =
             Backend::sign_request(&user.user_id, &body, &private_key, None);
@@ -92,13 +87,17 @@ impl Backend {
     /// Get and reserve a key package for a client.
     pub async fn consume_key_package(&self, user_id: &str) -> Result<KeyPackageIn, String> {
         let mut url = self.ds_url.clone();
-        // let path = format!("/api/user/key_packages/?target_user_id={}", user_id);
-        url.set_path("/api/user/key_packages/");
+        url.set_path("/api/user/get_key_package/");
 
-        let query = format!("target_user_id={}", user_id);
-        url.set_query(Some(&query));
+        let msg_params = QueryKeyPackagesParam {
+            target_userid: user_id.to_string(),
+            timestamp: instant::SystemTime::now()
+                .duration_since(instant::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        };
 
-        let response = get(&url).await?;
+        let response = _post(&url, &msg_params).await?;
         let response: Response<KeyPackagesResult> = from_slice(&response)
             .map_err(|e| format!("Error decoding server response: {:?}", e))?;
 
@@ -144,15 +143,14 @@ impl Backend {
         welcome_msg: &MlsMessageOut,
         sender: &str,
         receiver: &str,
+        group_id: &str,
     ) -> Result<(), String> {
         let mut url = self.ds_url.clone();
         url.set_path("/api/group/mls_state/");
 
-        let msg_base64_string = base64::encode_config(
-            welcome_msg.tls_serialize_detached().unwrap(),
-            base64::URL_SAFE,
-        );
-        let body = receiver.to_owned() + &msg_base64_string;
+        let msg_base64_string = base64::encode(welcome_msg.tls_serialize_detached().unwrap());
+        let body = group_id.to_owned() + receiver + &msg_base64_string;
+
         let private_key = NetworkingConfig::instance().get_private_key();
 
         let (signature, payload_hash, timestamp) =
@@ -164,7 +162,8 @@ impl Backend {
             web3mq_user_signature: signature,
             payload_hash: payload_hash,
             mls_msg: msg_base64_string,
-            recipients_topic_id: receiver.to_string(),
+            groupid: group_id.to_string(),
+            recipients_topicid: receiver.to_string(),
         };
 
         // The response should be empty.
@@ -173,16 +172,18 @@ impl Backend {
     }
 
     /// Send a group message.
-    pub async fn send_msg(&self, group_msg: &GroupMessage, sender: &str) -> Result<(), String> {
-        let mut url = self.ds_url.clone();
-        url.set_path("/send/message");
+    pub async fn send_msg(
+        &self,
+        group_msg: &GroupMessage,
+        sender: &str,
+        group_id: &str,
+    ) -> Result<(), String> {
+        let mut url: Url = self.ds_url.clone();
+        url.set_path("/api/group/mls_state/");
 
         let receiver_user_id = &group_msg.recipient;
-        let msg_base64_string = base64::encode_config(
-            group_msg.msg.tls_serialize_detached().unwrap(),
-            base64::URL_SAFE,
-        );
-        let body = receiver_user_id.clone() + &msg_base64_string;
+        let msg_base64_string = base64::encode(group_msg.msg.tls_serialize_detached().unwrap());
+        let body = group_id.to_owned() + receiver_user_id + &msg_base64_string;
         let private_key = NetworkingConfig::instance().get_private_key();
 
         let (signature, payload_hash, timestamp) =
@@ -194,7 +195,8 @@ impl Backend {
             web3mq_user_signature: signature,
             payload_hash: payload_hash,
             mls_msg: msg_base64_string,
-            recipients_topic_id: receiver_user_id.clone(),
+            groupid: group_id.to_string(),
+            recipients_topicid: receiver_user_id.clone(),
         };
 
         // The response should be empty.
@@ -209,25 +211,24 @@ impl Backend {
         groups: Vec<String>,
     ) -> Result<Vec<MlsMessageIn>, String> {
         let mut url = self.ds_url.clone();
-        let path = "/api/group/mls_state/".to_string();
+        let path = "/api/group/get_mls_state/".to_string();
         url.set_path(&path);
 
         let private_key = NetworkingConfig::instance().get_private_key();
+        // json_dumps groups, and then base64 encode
         let groups_json = serde_json::to_string(&groups).unwrap();
-        let body = base64::encode_config(groups_json, base64::URL_SAFE);
-        let (signature, payload_hash, timestamp) = Backend::sign_request(
-            &user.user_id,
-            &body,
-            &private_key,
-            Option::Some(*user.mls_sync_timestamp.borrow()),
-        );
+        let body = groups_json;
+        let (signature, payload_hash, timestamp) =
+            Backend::sign_request(&user.user_id, &body, &private_key, None);
 
+        // let sync_time = *user.mls_sync_timestamp.borrow();
         let msg_params = StatesRequestParams {
             userid: user.user_id.to_string(),
             timestamp: timestamp,
             web3mq_user_signature: signature,
             payload_hash: payload_hash,
             groupid_list: groups,
+            timestamp_gte: 0, // TODO: for debug
         };
 
         let response = _post(&url, &msg_params).await?;
@@ -240,11 +241,19 @@ impl Backend {
 
         for v in response.data.mls_states.values() {
             for value in v {
-                let response = base64::decode_config(value, base64::URL_SAFE).unwrap();
+                let response = base64::decode(value).unwrap();
                 let msg = MlsMessageIn::tls_deserialize(&mut response.as_slice()).unwrap();
                 results.push(msg);
             }
         }
+
+        // replace now
+        user.mls_sync_timestamp.replace(
+            instant::SystemTime::now()
+                .duration_since(instant::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        );
 
         Ok(results)
     }
@@ -257,7 +266,7 @@ impl Backend {
 impl Default for Backend {
     fn default() -> Self {
         Self {
-            ds_url: Url::parse("http://localhost:8080").unwrap(),
+            ds_url: Url::parse(&NetworkingConfig::instance().get_base_url()).unwrap(),
         }
     }
 }
