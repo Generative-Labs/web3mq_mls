@@ -1,0 +1,32 @@
+{
+  "name": "web3mq_mls",
+  "collaborators": [
+    "Web3MQ"
+  ],
+  "description": "",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Generative-Labs/web3mq_mls"
+  },
+  "files": [
+    "index_bg.wasm",
+    "index.js",
+    "index_bg.js",
+    "index.d.ts"
+  ],
+  "module": "index.js",
+  "types": "index.d.ts",
+  "sideEffects": [
+    "./index.js",
+    "./snippets/*"
+  ],
+  "keywords": [
+    "MLS",
+    "Web3MQ",
+    "RFC9420",
+    "Encryption",
+    "E2EE"
+  ]
+}
