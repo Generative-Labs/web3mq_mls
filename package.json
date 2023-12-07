@@ -6,6 +6,7 @@
     ],
     "main": "pkg/index.js",
     "scripts": {
+        "prepare": "webpack",
         "build": "webpack",
         "serve": "webpack serve"
     },
