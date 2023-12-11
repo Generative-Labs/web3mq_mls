@@ -1,11 +1,10 @@
 use std::borrow::BorrowMut;
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::string;
 use std::{cell::RefCell, collections::HashMap, str};
 
+use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
-use openmls::{messages, prelude::*};
 use openmls_traits::OpenMlsProvider;
 use rexie::{Rexie, TransactionMode};
 use tls_codec::TlsByteVecU8;

@@ -1,8 +1,9 @@
+use std::{collections::HashMap, sync::Mutex};
+
 use ed25519_dalek::{Signer, SigningKey};
 use lazy_static::lazy_static;
 use reqwest::{header::HeaderMap, Client, StatusCode};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Mutex};
 use tls_codec::Serialize;
 use url::Url;
 

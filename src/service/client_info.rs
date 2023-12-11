@@ -4,7 +4,6 @@ use openmls::prelude::*;
 use tls_codec::{
     TlsByteSliceU16, TlsByteVecU16, TlsByteVecU8, TlsDeserialize, TlsSerialize, TlsSize, TlsVecU32,
 };
-use wasm_bindgen_futures::js_sys::Array;
 
 #[derive(Debug, Default, Clone)]
 pub struct ClientInfo {
