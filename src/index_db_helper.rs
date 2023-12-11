@@ -1,6 +1,3 @@
-use std::{collections::HashMap, sync::Mutex};
-
-use lazy_static::lazy_static;
 use rexie::{self, Index, ObjectStore, Rexie};
 
 pub enum DatabaseType {
@@ -16,29 +13,6 @@ impl DatabaseType {
         }
     }
 }
-
-// pub struct IndexDBStorage {
-//     pub db: Mutex<HashMap<String, Rexie>>,
-// }
-
-// lazy_static! {
-//     static ref DATABASES: IndexDBStorage = IndexDBStorage {
-//         db: Mutex::new(HashMap::new())
-//     };
-// }
-
-// impl IndexDBStorage {}
-
-// pub async fn get_database(&self, user_id: &str) -> rexie::Result<Rexie> {
-//     let mut databases = self.db.lock().unwrap();
-//     if let Some(database) = databases.get(user_id) {
-//         Ok(database)
-//     } else {
-//         let database = self.build_database(user_id.to_string()).await?;
-//         databases.insert(user_id.to_string(), database);
-//         Ok(database)
-//     }
-// }
 
 pub async fn build_database(user_id: &str) -> rexie::Result<Rexie> {
     // Create a new database
@@ -61,15 +35,3 @@ pub async fn build_database(user_id: &str) -> rexie::Result<Rexie> {
         .build()
         .await
 }
-
-// impl IndexDBStorage {
-//     pub fn instance() -> &'static IndexDBStorage {
-//         &SINGLETON
-//     }
-
-//     pub async fn getInstance(user_id: &str) -> rexie::Result<Rexie> {
-//         self.db
-//             .get_or_insert_with(|| self.build_database(user_id).await)
-//     }
-
-// }

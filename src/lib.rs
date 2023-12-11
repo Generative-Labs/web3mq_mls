@@ -2,10 +2,7 @@ use openmls::framing::MlsMessageIn;
 use tls_codec::Deserialize;
 use wasm_bindgen::prelude::*;
 
-use service::{
-    networking::NetworkingConfig,
-    user::{self, User},
-};
+use service::{networking::NetworkingConfig, user::User};
 
 mod service;
 mod storage;
@@ -40,7 +37,7 @@ pub async fn initial_user(user_id: &str) -> Result<(), String> {
     return if loaded_user.is_err() {
         let mut user = User::new(user_id);
         user.enable_auto_save();
-        let _ = user.register().await?;
+        user.register().await?;
         user.save().await;
         Ok(())
     } else {
@@ -120,7 +117,6 @@ pub async fn handle_mls_group_event(user_id: &str, msg_bytes: Vec<u8>) -> Result
 
 #[cfg(test)]
 mod tests {
-
     use httpmock::{
         Method::{GET, POST},
         MockServer,
@@ -289,6 +285,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_external_join_group() {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+        // ... and the crypto backend to use.
+        let sasha_backend = &OpenMlsRustCrypto::default();
+        let bob_backend = &OpenMlsRustCrypto::default();
+
+        let (sasha_credential_with_key, sasha_signer) = generate_credential_with_key(
+            "Sasha".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            sasha_backend,
+        );
+
+        let group_config = MlsGroupConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+        let mut sasha_group = MlsGroup::new(
+            sasha_backend,
+            &sasha_signer,
+            &group_config,
+            sasha_credential_with_key.clone(),
+        )
+        .expect("An unexpected error occurred.");
+
+        let (bob_credential_with_key, bob_signer) = generate_credential_with_key(
+            "Bob".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            bob_backend,
+        );
+        let bob_key_package = generate_key_package(
+            ciphersuite,
+            bob_backend,
+            &bob_signer,
+            bob_credential_with_key.clone(),
+        );
+
+        let proposal = JoinProposal::new(
+            bob_key_package,
+            sasha_group.group_id().clone(),
+            sasha_group.epoch(),
+            &bob_signer,
+        )
+        .expect("Could not create external Add proposal");
+
+        let sasha_processed_message = sasha_group
+            .process_message(
+                sasha_backend,
+                proposal
+                    .into_protocol_message()
+                    .expect("Unexpected message type."),
+            )
+            .expect("Could not process message.");
+
+        match sasha_processed_message.into_content() {
+            ProcessedMessageContent::ExternalJoinProposalMessage(proposal) => {
+                sasha_group.store_pending_proposal(*proposal);
+                let (_commit, welcome, _group_info) = sasha_group
+                    .commit_to_pending_proposals(sasha_backend, &sasha_signer)
+                    .expect("Could not commit");
+                assert_eq!(sasha_group.members().count(), 1);
+                sasha_group
+                    .merge_pending_commit(sasha_backend)
+                    .expect("Could not merge commit");
+                assert_eq!(sasha_group.members().count(), 2);
+
+                let bob_group = MlsGroup::new_from_welcome(
+                    bob_backend,
+                    &group_config,
+                    welcome
+                        .unwrap()
+                        .into_welcome()
+                        .expect("Unexpected message type."),
+                    None,
+                )
+                .expect("Bob could not join the group");
+                assert_eq!(bob_group.members().count(), 2);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
     async fn test_persistent() {
         let user_id = "Alice".to_string();
         let loaded_user = User::load(&user_id).await;
@@ -417,8 +496,8 @@ mod tests {
         // Create a mock on the server.
         let get_mock = server.mock(|when, then| {
             when.method(GET)
-            .path("/api/user/key_packages/")
-            .query_param("target_user_id", user_id.clone());
+                .path("/api/user/key_packages/")
+                .query_param("target_user_id", user_id.clone());
             then.status(200).json_body(json!({ "code": 0,  "msg": "ok",  "data": {"userid": user.user_id.clone(), "timestamp": 0, "web3mq_user_signature": "", "key_packages": user.key_packages_map()}  }));
         });
 
