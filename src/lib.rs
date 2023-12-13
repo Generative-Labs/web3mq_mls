@@ -368,6 +368,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_external_commit() {
+        let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+        // ... and the crypto backend to use.
+        let sasha_backend = &OpenMlsRustCrypto::default();
+        let bob_backend = &OpenMlsRustCrypto::default();
+
+        // First they need credentials to identify them
+        let (sasha_credential_with_key, sasha_signer) = generate_credential_with_key(
+            "Sasha".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            sasha_backend,
+        );
+        let sasha_key_package = generate_key_package(
+            ciphersuite,
+            sasha_backend,
+            &sasha_signer,
+            sasha_credential_with_key.clone(),
+        );
+
+        let (bob_credential_with_key, bob_signer) = generate_credential_with_key(
+            "Bob".into(),
+            CredentialType::Basic,
+            ciphersuite.signature_algorithm(),
+            sasha_backend,
+        );
+
+        let group_config = MlsGroupConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
+
+        let mut sasha_group = MlsGroup::new(
+            sasha_backend,
+            &sasha_signer,
+            &group_config,
+            sasha_credential_with_key.clone(),
+        )
+        .expect("An unexpected error occurred.");
+    }
+
+    #[tokio::test]
     async fn test_persistent() {
         let user_id = "Alice".to_string();
         let loaded_user = User::load(&user_id).await;
