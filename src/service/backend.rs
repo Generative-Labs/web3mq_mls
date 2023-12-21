@@ -1,3 +1,4 @@
+use openmls::messages::group_info::GroupInfo;
 use openmls::prelude::*;
 use serde_json::from_slice;
 use sha2::{Digest, Sha256};
@@ -135,6 +136,55 @@ impl Backend {
         // The response should be empty.
         let _response = post(&url, &ckp).await?;
         Ok(())
+    }
+
+    ///
+    pub async fn publish_group_info(&self, group_info: &MlsMessageOut) -> Result<(), String> {
+        let mut url = self.ds_url.clone();
+        url.set_path("/api/group/mls_group_info/");
+
+        // TODO: get the group id from group_info
+
+        // let private_key = NetworkingConfig::instance().get_private_key();
+        // let json_string = serde_json::to_string(&key_packages.clone()).expect("Error serializing");
+        // let body = json_string;
+
+        // let (signature, payload_hash, timestamp) =
+        //     Backend::sign_request(&user.user_id, &body, &private_key, None);
+
+        // let client_info = RegisterKeyPackageParams {
+        //     userid: user.user_id.clone(),
+        //     timestamp,
+        //     key_packages: key_packages.clone(),
+        //     payload_hash: payload_hash,
+        //     web3mq_user_signature: signature,
+        // };
+
+        // let response = _post(&url, &client_info).await?;
+        // Ok(String::from_utf8(response).unwrap())
+        Ok(())
+    }
+
+    pub async fn get_group_info(&self, group_id: &str) -> Result<GroupInfo, String> {
+        let mut url = self.ds_url.clone();
+        url.set_path("/api/group/mls_group_info/");
+
+        // let response = _post(&url).await?;
+        // let response: Response<StatesRequestResult> = from_slice(&response)
+        //     .map_err(|e| format!("Error decoding server response: {:?}", e))?;
+
+        // // get the MlsMessageIn from every response.data.mls_states.value
+        // // flat all response.data.mls_states.values
+        // let mut results: Vec<MlsMessageIn> = Vec::with_capacity(response.data.mls_states.len());
+
+        // for v in response.data.mls_states.values() {
+        //     for value in v {
+        //         let response = base64::decode(value).unwrap();
+        //         let msg = MlsMessageIn::tls_deserialize(&mut response.as_slice()).unwrap();
+        //         results.push(msg);
+        //     }
+        // }
+        Err("TODO".to_string())
     }
 
     /// Send a welcome message.

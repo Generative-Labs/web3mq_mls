@@ -406,6 +406,35 @@ mod tests {
             sasha_credential_with_key.clone(),
         )
         .expect("An unexpected error occurred.");
+
+        // sasha_group.export_group_info(crypto, signer, with_ratchet_tree)
+
+        let group_info = sasha_group
+            .export_group_info(sasha_backend.crypto(), &sasha_signer, true)
+            .expect("Error exporting group info");
+
+        let verifiable_group_info = group_info.into_verifiable_group_info();
+
+        let result = MlsGroup::join_by_external_commit(
+            bob_backend,
+            &bob_signer,
+            None,
+            verifiable_group_info.unwrap(),
+            &group_config,
+            &[],
+            bob_credential_with_key,
+        )
+        .expect("Error joining group by external commit");
+
+        // print sasha_group.aad()
+        print!("sasha group aad: {:?}", sasha_group.aad());
+
+        let (bob_group, message_out, group_info) = result;
+
+        print!("bob group aad: {:?}", bob_group.aad());
+
+        // print bob group id
+        print!("bob group id: {:?}", bob_group.group_id());
     }
 
     #[tokio::test]

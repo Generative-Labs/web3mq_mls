@@ -35,6 +35,15 @@ pub struct RegisterKeyPackageParams {
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdateGroupInfoParams {
+    pub userid: String,
+    pub timestamp: u128,
+    pub key_packages: HashMap<String, String>,
+    pub payload_hash: String,
+    pub web3mq_user_signature: String,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SendMessageParams {
     pub userid: String,
     pub timestamp: u128,

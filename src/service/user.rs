@@ -1,8 +1,9 @@
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
 
+use openmls::messages::group_info::{GroupInfo, VerifiableGroupInfo};
 use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
 use openmls_traits::OpenMlsProvider;
@@ -317,6 +318,12 @@ impl User {
             Ok(()) => (),
             Err(e) => println!("Error sending new key package: {e:?}"),
         };
+    }
+
+    pub async fn create_kp_and_publish(&self) -> Result<(), String> {
+        let _ = self.add_key_package();
+        self.register().await?;
+        Ok(())
     }
 
     /// Send an application message to the group.
@@ -821,9 +828,7 @@ impl User {
             None => Ok(()),
         };
 
-        let _ = self.add_key_package();
-        self.register().await?;
-
+        self.create_kp_and_publish().await?;
         self.autosave().await;
 
         return result;
@@ -880,5 +885,76 @@ impl User {
             .as_millis();
         *self.mls_sync_timestamp.borrow_mut() = timestamp;
         self.autosave().await;
+    }
+
+    pub async fn join_by_external_commit(
+        &mut self,
+        group_info: VerifiableGroupInfo,
+    ) -> Result<(), String> {
+        {
+            // join by external commit
+            let group_config = MlsGroupConfig::builder()
+                .use_ratchet_tree_extension(true)
+                .build();
+            let credential_key = &self.identity.borrow().credential_with_key;
+            let (mut mls_group, out_message, group_info) = MlsGroup::join_by_external_commit(
+                &self.crypto,
+                &self.identity.borrow().signer,
+                None,
+                group_info,
+                &group_config,
+                &[],
+                credential_key.to_owned(),
+            )
+            .expect("Error joining group by external commit");
+
+            // set the aad
+            let group_id = mls_group.group_id().to_vec();
+            let group_name = String::from_utf8(group_id.clone()).unwrap();
+            let group_aad = group_name.clone() + " AAD";
+            mls_group.set_aad(group_aad.as_bytes());
+
+            let group = Group {
+                group_id: group_name.clone(),
+                conversation: Conversation::default(),
+                mls_group: RefCell::new(mls_group),
+            };
+
+            let result = match self.groups.borrow_mut().insert(group_name.clone(), group) {
+                Some(old) => Err(format!("Overrode the group {:?}", old.group_id)),
+                None => Ok(()),
+            };
+
+            // fan out the out_message
+            let msg: GroupMessage = GroupMessage::new(out_message.into(), &group_name);
+            self.backend
+                .send_msg(&msg, &self.user_id, &group_name)
+                .await?;
+
+            // update the group_info
+            self.backend
+                .publish_group_info(&group_info.unwrap().into())
+                .await?;
+
+            // merge pending commit
+            self.groups
+                .borrow_mut()
+                .get_mut(&group_name)
+                .unwrap()
+                .mls_group
+                .borrow_mut()
+                .merge_pending_commit(&self.crypto);
+
+            //
+            self.create_kp_and_publish().await?;
+
+            if result.is_err() {
+                return result;
+            }
+        }
+
+        self.autosave().await;
+
+        Ok(())
     }
 }
