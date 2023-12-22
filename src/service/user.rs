@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
 
+use async_trait::async_trait;
 use openmls::messages::group_info::{GroupInfo, VerifiableGroupInfo};
 use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
@@ -16,6 +17,11 @@ use crate::service::client_info::{ClientKeyPackages, GroupMessage};
 use crate::service::conversation::{Conversation, ConversationMessage};
 use crate::service::identity::Identity;
 use crate::storage::persistent_crypto::OpenMlsRustPersistentCrypto;
+
+use crate::file_helpers;
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
+use std::path::PathBuf;
 
 const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
@@ -53,28 +59,41 @@ pub enum PostUpdateActions {
     Remove,
 }
 
+#[async_trait]
+pub trait UserStore {
+    async fn load(user_id: &str) -> Result<User, String>;
+    async fn save(&mut self);
+}
+
+#[cfg(not(target_family = "wasm"))]
 impl User {
-    /// Create a new user with the given name and a fresh set of credentials.
-    pub fn new(user_id: &str) -> Self {
-        let crypto = OpenMlsRustPersistentCrypto::default();
-        let out = Self {
-            user_id: user_id.to_string(),
-            groups: RefCell::new(HashMap::new()),
-            group_list: HashSet::new(),
-            identity: RefCell::new(Identity::new(CIPHERSUITE, &crypto, user_id.as_bytes())),
-            backend: Backend::default(),
-            crypto,
-            autosave_enabled: false,
-            mls_sync_timestamp: RefCell::new(0),
-        };
-        return out;
+    fn get_file_path(user_name: &String) -> PathBuf {
+        file_helpers::get_file_path(&("web3mq_".to_owned() + user_name + ".json"))
     }
 
-    /// Get a list of groups the user is a member of.
-    pub fn get_groups(&self) -> Vec<String> {
-        self.groups.borrow().keys().cloned().collect()
+    fn load_from_file(input_file: &File) -> Result<Self, String> {
+        // Prepare file reader.
+        let reader = BufReader::new(input_file);
+
+        // Read the JSON contents of the file as an instance of `User`.
+        match serde_json::from_reader::<BufReader<&File>, User>(reader) {
+            Ok(user) => Ok(user),
+            Err(e) => Result::Err(e.to_string()),
+        }
     }
 
+    fn save_to_file(&self, output_file: &File) {
+        let writer = BufWriter::new(output_file);
+        match serde_json::to_writer_pretty(writer, &self) {
+            Ok(()) => log::info!("User serialized"),
+            Err(e) => log::error!("Error serializing user: {:?}", e.to_string()),
+        }
+    }
+}
+
+#[async_trait]
+#[cfg(target_family = "wasm")]
+impl User {
     async fn load_from_file(database: &Rexie, user_id: &str) -> Result<User, String> {
         let transaction = database
             .transaction(
@@ -96,8 +115,105 @@ impl User {
         }
     }
 
-    ///
-    pub async fn load(user_id: &str) -> Result<User, String> {
+    async fn save_to_file(&self) {
+        let database = index_db_helper::build_database(&self.user_id)
+            .await
+            .expect("Error building database");
+
+        let transaction = database
+            .transaction(
+                &[DatabaseType::User.store_name()],
+                TransactionMode::ReadWrite,
+            )
+            .expect("Error creating transaction");
+
+        let store = transaction
+            .store(DatabaseType::User.store_name().as_str())
+            .expect("Error getting store");
+
+        let ks: wasm_bindgen::prelude::JsValue = serde_wasm_bindgen::to_value(&self).unwrap();
+        let key = serde_wasm_bindgen::to_value(&self.user_id.clone()).unwrap();
+        store
+            .put(&ks, Some(&key))
+            .await
+            .expect("Error putting value");
+
+        transaction
+            .done()
+            .await
+            .expect("Error committing transaction");
+    }
+}
+
+#[async_trait]
+#[cfg(not(target_family = "wasm"))]
+impl UserStore for User {
+    async fn load(user_id: &str) -> Result<User, String> {
+        let input_path = User::get_file_path(&user_id.to_string());
+        match File::open(input_path) {
+            Err(e) => {
+                log::error!("Error loading user state: {:?}", e.to_string());
+                Err(e.to_string())
+            }
+            Ok(input_file) => {
+                let user_result = User::load_from_file(&input_file);
+                if user_result.is_ok() {
+                    let mut user = user_result.ok().unwrap();
+                    match user.crypto.load_keystore(user_id.to_string()) {
+                        Ok(_) => {
+                            let groups = user.groups.get_mut();
+                            for group_name in &user.group_list {
+                                let mlsgroup = MlsGroup::load(
+                                    &GroupId::from_slice(group_name.as_bytes()),
+                                    user.crypto.key_store(),
+                                );
+                                let grp = Group {
+                                    mls_group: RefCell::new(mlsgroup.unwrap()),
+                                    group_id: group_name.clone(),
+                                    conversation: Conversation::default(),
+                                };
+                                groups.insert(group_name.clone(), grp);
+                            }
+                            Ok(user)
+                        }
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    user_result
+                }
+            }
+        }
+    }
+
+    async fn save(&mut self) {
+        let output_path = User::get_file_path(&self.user_id);
+        match File::create(output_path) {
+            Err(e) => log::error!("Error saving user state: {:?}", e.to_string()),
+            Ok(output_file) => {
+                let groups = self.groups.get_mut();
+                for (group_name, group) in groups {
+                    self.group_list.replace(group_name.clone());
+                    group
+                        .mls_group
+                        .borrow_mut()
+                        .save(self.crypto.key_store())
+                        .unwrap();
+                }
+
+                self.save_to_file(&output_file);
+
+                match self.crypto.save_keystore(self.user_id.clone()) {
+                    Ok(_) => log::info!("User state saved"),
+                    Err(e) => log::error!("Error saving user state : {:?}", e.to_string()),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl UserStore for User {
+    async fn load(user_id: &str) -> Result<User, String> {
         let database = index_db_helper::build_database(user_id).await;
         match database {
             Err(e) => {
@@ -135,37 +251,8 @@ impl User {
         }
     }
 
-    async fn save_to_file(&self) {
-        let database = index_db_helper::build_database(&self.user_id)
-            .await
-            .expect("Error building database");
-
-        let transaction = database
-            .transaction(
-                &[DatabaseType::User.store_name()],
-                TransactionMode::ReadWrite,
-            )
-            .expect("Error creating transaction");
-
-        let store = transaction
-            .store(DatabaseType::User.store_name().as_str())
-            .expect("Error getting store");
-
-        let ks: wasm_bindgen::prelude::JsValue = serde_wasm_bindgen::to_value(&self).unwrap();
-        let key = serde_wasm_bindgen::to_value(&self.user_id.clone()).unwrap();
-        store
-            .put(&ks, Some(&key))
-            .await
-            .expect("Error putting value");
-
-        transaction
-            .done()
-            .await
-            .expect("Error committing transaction");
-    }
-
     /// Save the user state to a file.
-    pub async fn save(&mut self) {
+    async fn save(&mut self) {
         let groups = self.groups.get_mut();
         for (group_name, group) in groups {
             self.group_list.replace(group_name.clone());
@@ -176,12 +263,36 @@ impl User {
                 .unwrap();
         }
 
+        self.save_to_file().await;
+
         match self.crypto.save_keystore(self.user_id.clone()).await {
             Ok(_) => log::debug!("User state saved"),
             Err(e) => panic!("Error saving user state : {:?}", e.to_string()),
         }
+    }
+}
 
-        self.save_to_file().await;
+/// Functional interface to the user.
+impl User {
+    /// Create a new user with the given name and a fresh set of credentials.
+    pub fn new(user_id: &str) -> Self {
+        let crypto = OpenMlsRustPersistentCrypto::default();
+        let out = Self {
+            user_id: user_id.to_string(),
+            groups: RefCell::new(HashMap::new()),
+            group_list: HashSet::new(),
+            identity: RefCell::new(Identity::new(CIPHERSUITE, &crypto, user_id.as_bytes())),
+            backend: Backend::default(),
+            crypto,
+            autosave_enabled: false,
+            mls_sync_timestamp: RefCell::new(0),
+        };
+        return out;
+    }
+
+    /// Get a list of groups the user is a member of.
+    pub fn get_groups(&self) -> Vec<String> {
+        self.groups.borrow().keys().cloned().collect()
     }
 
     ///
@@ -255,40 +366,6 @@ impl User {
     pub async fn register(&self) -> Result<String, String> {
         return self.backend.register_key_packages(self).await;
     }
-
-    /// Get a list of clients in the group to send messages to.
-    // fn recipients(&self, group: &Group) -> Vec<Vec<u8>> {
-    //     let mut recipients = Vec::new();
-
-    //     let mls_group = group.mls_group.borrow();
-    //     for Member {
-    //         index: _,
-    //         encryption_key: _,
-    //         signature_key,
-    //         credential,
-    //     } in mls_group.members()
-    //     {
-    //         if self
-    //             .identity
-    //             .borrow()
-    //             .credential_with_key
-    //             .signature_key
-    //             .as_slice()
-    //             != signature_key.as_slice()
-    //         {
-    //             log::debug!(
-    //                 "Searching for contact {:?}",
-    //                 str::from_utf8(credential.identity()).unwrap()
-    //             );
-    //             let contact = match self.contacts.get(&credential.identity().to_vec()) {
-    //                 Some(c) => c.id.clone(),
-    //                 None => panic!("There's a member in the group we don't know."),
-    //             };
-    //             recipients.push(contact);
-    //         }
-    //     }
-    //     recipients
-    // }
 
     /// Return the last 100 messages sent to the group.
     pub fn read_msgs(&self, group_id: String) -> Result<Option<Vec<ConversationMessage>>, String> {
@@ -413,91 +490,7 @@ impl User {
             },
             None => Err("Group not found".to_string()),
         }
-
-        // if sender == self.user_id {
-        //     // find the message in the conversation.messages
-        //     match self.groups.borrow().get(&group_id) {
-        //         Some(group) => match group.conversation.get_cached_message(content) {
-        //             Some(message) => Ok(message),
-        //             None => Err("Error reading message".to_string()),
-        //         },
-        //         None => Err("Group not found".to_string()),
-        //     }
-        // } else {
-        //     // hex to bytes
-        //     let msg_bytes = hex_to_bytes(&content);
-        //     let mls_message = MlsMessageIn::tls_deserialize_exact(msg_bytes)
-        //         .map_err(|_| "Could not deserialize message.".to_string())?;
-        //     let protocol_message: ProtocolMessage = mls_message.into();
-        //     // get the MlsGroup from groups
-        //     match self.groups.borrow().get(&group_id) {
-        //         Some(group) => {
-        //             match group
-        //                 .mls_group
-        //                 .borrow_mut()
-        //                 .process_message(&self.crypto, protocol_message)
-        //             {
-        //                 Ok(processed_message) => {
-        //                     if let ProcessedMessageContent::ApplicationMessage(
-        //                         application_message,
-        //                     ) = processed_message.into_content()
-        //                     {
-        //                         // bytes to string
-        //                         String::from_utf8(application_message.into_bytes())
-        //                             .map_err(|_| "Invalid UTF-8 sequence".to_string())
-        //                     } else {
-        //                         Err("Error processing unverified message".to_string())
-        //                     }
-        //                 }
-        //                 Err(e) => Err(format!("Could not process message: {}", e)),
-        //             }
-        //         }
-        //         None => Err("Group not found".to_string()),
-        //     }
-        // }
     }
-
-    // /// Update the user clients list.
-    // /// It updates the contacts with all the clients known by the server
-    // async fn update_clients(&mut self) {
-    //     match self.backend.list_clients().await {
-    //         Ok(mut v) => {
-    //             for c in v.drain(..) {
-    //                 let client_id = c.id.clone();
-    //                 log::debug!(
-    //                     "update::Processing client for contact {:?}",
-    //                     str::from_utf8(&client_id).unwrap()
-    //                 );
-    //                 if c.id != self.identity.borrow().identity()
-    //                     && self
-    //                         .contacts
-    //                         .insert(
-    //                             c.id.clone(),
-    //                             Contact {
-    //                                 username: c.client_name,
-    //                                 id: c.id,
-    //                             },
-    //                         )
-    //                         .is_some()
-    //                 {
-    //                     log::debug!(
-    //                         "update::added client to contact {:?}",
-    //                         str::from_utf8(&client_id).unwrap()
-    //                     );
-    //                     log::trace!("Updated client {}", "");
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => log::debug!("update_clients::Error reading clients from DS: {:?}", e),
-    //     }
-    //     log::debug!("update::Processing clients done, contact list is:");
-    //     for contact_id in self.contacts.borrow().keys() {
-    //         log::debug!(
-    //             "update::Parsing contact {:?}",
-    //             str::from_utf8(contact_id).unwrap()
-    //         );
-    //     }
-    // }
 
     /// Update the user. This involves:
     /// * retrieving all new messages from the server
@@ -943,7 +936,8 @@ impl User {
                 .unwrap()
                 .mls_group
                 .borrow_mut()
-                .merge_pending_commit(&self.crypto);
+                .merge_pending_commit(&self.crypto)
+                .expect("Error merging pending commit");
 
             //
             self.create_kp_and_publish().await?;

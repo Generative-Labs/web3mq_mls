@@ -27,6 +27,7 @@ impl OpenMlsProvider for OpenMlsRustPersistentCrypto {
     }
 }
 
+#[cfg(target_family = "wasm")]
 impl OpenMlsRustPersistentCrypto {
     pub async fn save_keystore(&self, user_name: String) -> Result<(), String> {
         self.key_store.save(user_name).await
@@ -34,5 +35,16 @@ impl OpenMlsRustPersistentCrypto {
 
     pub async fn load_keystore(&mut self, user_name: String) -> Result<(), String> {
         self.key_store.load(user_name).await
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl OpenMlsRustPersistentCrypto {
+    pub fn save_keystore(&self, user_name: String) -> Result<(), String> {
+        self.key_store.save(user_name)
+    }
+
+    pub fn load_keystore(&mut self, user_name: String) -> Result<(), String> {
+        self.key_store.load(user_name)
     }
 }

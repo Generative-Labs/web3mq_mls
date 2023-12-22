@@ -2,11 +2,15 @@ use openmls::framing::MlsMessageIn;
 use tls_codec::Deserialize;
 use wasm_bindgen::prelude::*;
 
-use service::{networking::NetworkingConfig, user::User};
+use service::{
+    networking::NetworkingConfig,
+    user::{User, UserStore},
+};
 
 mod service;
 mod storage;
 // private
+mod file_helpers;
 mod index_db_helper;
 
 #[wasm_bindgen]
@@ -141,7 +145,7 @@ mod tests {
         service::{
             backend::{self, Backend},
             networking::ed25519_sign,
-            user::User,
+            user::{User, UserStore},
         },
         setup_networking_config,
     };
