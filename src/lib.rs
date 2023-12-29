@@ -125,25 +125,16 @@ mod tests {
         Method::{GET, POST},
         MockServer,
     };
-    // use openmls::{
-    //     credentials::{Credential, CredentialType, CredentialWithKey},
-    //     framing::{MlsMessageIn, MlsMessageInBody},
-    //     group::{config::CryptoConfig, MlsGroup, MlsGroupConfig},
-    //     prelude_test::KeyPackage,
-    //     versions::ProtocolVersion,
-    // };
+    use openmls::prelude::{config::CryptoConfig, *};
     use openmls_basic_credential::SignatureKeyPair;
     use openmls_rust_crypto::OpenMlsRustCrypto;
     use openmls_traits::types::{Ciphersuite, SignatureScheme};
     use serde_json::json;
     use sha2::{Digest, Sha256};
 
-    use openmls::prelude::{config::CryptoConfig, *};
-
     use crate::{
-        add_member_to_group, create_group, initial_user,
         service::{
-            backend::{self, Backend},
+            backend::Backend,
             networking::ed25519_sign,
             user::{User, UserStore},
         },

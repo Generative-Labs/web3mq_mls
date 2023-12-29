@@ -7,13 +7,9 @@ use std::{
 };
 
 use openmls_traits::key_store::{MlsEntity, OpenMlsKeyStore};
-use rexie::TransactionMode;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    file_helpers,
-    index_db_helper::{self, DatabaseType},
-};
+use crate::file_helpers;
 
 #[derive(Debug, Default)]
 pub struct PersistentKeyStore {

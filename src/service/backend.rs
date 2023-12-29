@@ -2,7 +2,6 @@ use openmls::messages::group_info::GroupInfo;
 use openmls::prelude::*;
 use serde_json::from_slice;
 use sha2::{Digest, Sha256};
-
 use tls_codec::Deserialize;
 use url::Url;
 
@@ -13,7 +12,7 @@ use super::client_info::{
     KeyPackagesResult, RegisterKeyPackageParams, Response, SendMessageParams, StatesRequestParams,
     StatesRequestResult,
 };
-use super::networking::{ed25519_sign, get, post, NetworkingConfig, _post};
+use super::networking::{_post, ed25519_sign, post, NetworkingConfig};
 
 trait RequestSigner {
     fn sign_request(

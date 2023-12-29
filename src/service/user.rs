@@ -1,27 +1,24 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, str};
 
 use async_trait::async_trait;
-use openmls::messages::group_info::{GroupInfo, VerifiableGroupInfo};
+use openmls::messages::group_info::VerifiableGroupInfo;
 use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
 use openmls_traits::OpenMlsProvider;
-use rexie::{Rexie, TransactionMode};
 use tls_codec::TlsByteVecU8;
 
-use crate::index_db_helper::{self, DatabaseType};
+use crate::file_helpers;
 use crate::service::backend::Backend;
 use crate::service::client_info::{ClientKeyPackages, GroupMessage};
 use crate::service::conversation::{Conversation, ConversationMessage};
 use crate::service::identity::Identity;
 use crate::storage::persistent_crypto::OpenMlsRustPersistentCrypto;
-
-use crate::file_helpers;
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
-use std::path::PathBuf;
 
 const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
