@@ -360,8 +360,14 @@ impl User {
     }
 
     ///
-    pub async fn register(&self) -> Result<String, String> {
+    pub async fn publish_key_packages(&self) -> Result<String, String> {
         return self.backend.register_key_packages(self).await;
+    }
+
+    pub async fn create_kp_and_publish(&self) -> Result<(), String> {
+        let _ = self.add_key_package();
+        self.publish_key_packages().await?;
+        Ok(())
     }
 
     /// Return the last 100 messages sent to the group.
@@ -375,29 +381,6 @@ impl User {
                     .map(|messages: &[ConversationMessage]| messages.to_vec()))
             },
         )
-    }
-
-    /// Create a new key package and publish it to the delivery server
-    pub async fn create_kp(&self) {
-        let kp = self.add_key_package();
-        let ckp = ClientKeyPackages(
-            vec![kp]
-                .into_iter()
-                .map(|(b, kp)| (b.into(), KeyPackageIn::from(kp)))
-                .collect::<Vec<(TlsByteVecU8, KeyPackageIn)>>()
-                .into(),
-        );
-
-        match self.backend.publish_key_packages(self, &ckp).await {
-            Ok(()) => (),
-            Err(e) => println!("Error sending new key package: {e:?}"),
-        };
-    }
-
-    pub async fn create_kp_and_publish(&self) -> Result<(), String> {
-        let _ = self.add_key_package();
-        self.register().await?;
-        Ok(())
     }
 
     /// Send an application message to the group.
@@ -431,16 +414,6 @@ impl User {
         self.autosave().await;
 
         Ok(msg_to_ds)
-    }
-
-    pub fn get_all_messages_self(&self, group_id: String) -> Result<Vec<String>, String> {
-        Ok(self
-            .groups
-            .borrow()
-            .get(&group_id)
-            .unwrap()
-            .conversation
-            .get_all_messages())
     }
 
     /// Reads the message, content should be hex encoded.
@@ -496,7 +469,7 @@ impl User {
         log::debug!("Updating {} ...", self.user_id);
         log::debug!("update::Processing messages for {} ", self.user_id);
         // Go through the list of messages and process or store them.
-        for message in self.backend.recv_msgs(self, groups).await?.drain(..) {
+        for message in self.backend.recv_mls_events(self, groups).await?.drain(..) {
             log::debug!("Reading message format {:#?} ...", message.wire_format());
             let _ = self.handle_mls_group_event(message).await;
         }
@@ -673,12 +646,6 @@ impl User {
         user_id: &str,
         group_name: &str,
     ) -> Result<(), String> {
-        // First we need to get the key package for {id} from the DS.
-        // let contact = match self.contacts.values().find(|c| c.username == name) {
-        //     Some(v) => v,
-        //     None => return Err(format!("No contact with name {name} known.")),
-        // };
-
         // Reclaim a key package from the server
         let joiner_key_package = self.backend.consume_key_package(&user_id).await.unwrap();
 
@@ -848,6 +815,15 @@ impl User {
             .send_msg(&msg, &self.user_id, &group_id)
             .await?;
 
+        // publish group info
+        let group_info = group
+            .mls_group
+            .borrow()
+            .export_group_info(self.crypto.crypto(), &self.identity.borrow().signer, true)
+            .expect("Error exporting group info");
+
+        self.backend.publish_group_info(&group_info.into()).await?;
+
         // Second, process the removal on our end.
         group
             .mls_group
@@ -861,6 +837,10 @@ impl User {
 
         Ok(())
     }
+
+    // async fn publish_group_info(self, mls_group: &MlsGroup) -> Result<(), String> {
+
+    // }
 
     ///
     pub fn reset_ds_url(&mut self, ds_url: &str) {

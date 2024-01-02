@@ -41,7 +41,7 @@ pub async fn initial_user(user_id: &str) -> Result<(), String> {
     return if loaded_user.is_err() {
         let mut user = User::new(user_id);
         user.enable_auto_save();
-        user.register().await?;
+        user.publish_key_packages().await?;
         user.save().await;
         Ok(())
     } else {
@@ -52,7 +52,7 @@ pub async fn initial_user(user_id: &str) -> Result<(), String> {
 #[wasm_bindgen]
 pub async fn register_user(user_id: &str) -> Result<String, String> {
     let user = User::load(user_id).await?;
-    return user.register().await;
+    return user.publish_key_packages().await;
 }
 
 #[wasm_bindgen]
@@ -595,7 +595,7 @@ mod tests {
             then.status(200).json_body(json!({ "code": 0 , "msg": "ok",  "data": {"userid": user.user_id.clone(), "timestamp": 0, "web3mq_user_signature": "", "key_packages": user.key_packages_map()} }));
         });
 
-        let result: Result<String, String> = user.register().await;
+        let result: Result<String, String> = user.publish_key_packages().await;
         print!("result: {:?}", result);
         assert_eq!(result.is_ok(), true);
         post_mock.assert();

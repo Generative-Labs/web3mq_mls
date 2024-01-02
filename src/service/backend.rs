@@ -122,7 +122,7 @@ impl Backend {
     }
 
     /// Publish client additional key packages.
-    pub async fn publish_key_packages(
+    async fn publish_key_packages(
         &self,
         user: &User,
         ckp: &ClientKeyPackages,
@@ -139,7 +139,7 @@ impl Backend {
 
     ///
     pub async fn publish_group_info(&self, group_info: &MlsMessageOut) -> Result<(), String> {
-        let mut url = self.ds_url.clone();
+        let mut url: Url = self.ds_url.clone();
         url.set_path("/api/group/mls_group_info/");
 
         // TODO: get the group id from group_info
@@ -254,7 +254,7 @@ impl Backend {
     }
 
     /// Get a list of all new messages for the user.
-    pub async fn recv_msgs(
+    pub async fn recv_mls_events(
         &self,
         user: &User,
         groups: Vec<String>,
