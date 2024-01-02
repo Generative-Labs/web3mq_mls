@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -11,11 +11,10 @@ use openmls::messages::group_info::VerifiableGroupInfo;
 use openmls::prelude::*;
 use openmls::test_utils::{bytes_to_hex, hex_to_bytes};
 use openmls_traits::OpenMlsProvider;
-use tls_codec::TlsByteVecU8;
 
 use crate::file_helpers;
 use crate::service::backend::Backend;
-use crate::service::client_info::{ClientKeyPackages, GroupMessage};
+use crate::service::client_info::GroupMessage;
 use crate::service::conversation::{Conversation, ConversationMessage};
 use crate::service::identity::Identity;
 use crate::storage::persistent_crypto::OpenMlsRustPersistentCrypto;
@@ -656,7 +655,7 @@ impl User {
             None => return Err(format!("No group with name {group_name} known.")),
         };
 
-        let (out_messages, welcome, _group_info) = group
+        let (out_messages, welcome, group_info) = group
             .mls_group
             .borrow_mut()
             .add_members(
@@ -684,6 +683,14 @@ impl User {
             .borrow_mut()
             .merge_pending_commit(&self.crypto)
             .expect("error merging pending commit");
+
+        // publish group info
+        match group_info {
+            Some(group_info) => {
+                self.backend.publish_group_info(&group_info.into()).await?;
+            }
+            None => {}
+        }
 
         // Finally, send Welcome to the joiner.
         log::trace!("Sending welcome");
@@ -717,7 +724,7 @@ impl User {
         };
 
         // Remove operation on the mls group
-        let (remove_message, _welcome, _group_info) = group
+        let (remove_message, _welcome, group_info) = group
             .mls_group
             .borrow_mut()
             .remove_members(&self.crypto, &self.identity.borrow().signer, &[leaf_index])
@@ -733,13 +740,12 @@ impl User {
             .await?;
 
         // publish group info
-        let group_info = group
-            .mls_group
-            .borrow()
-            .export_group_info(self.crypto.crypto(), &self.identity.borrow().signer, true)
-            .expect("Error exporting group info");
-
-        self.backend.publish_group_info(&group_info.into()).await?;
+        match group_info {
+            Some(group_info) => {
+                self.backend.publish_group_info(&group_info.into()).await?;
+            }
+            None => {}
+        }
 
         // Second, process the removal on our end.
         group
@@ -831,8 +837,6 @@ impl User {
             .export_group_info(self.crypto.crypto(), &self.identity.borrow().signer, true)
             .expect("Error exporting group info");
 
-        self.backend.publish_group_info(&group_info.into()).await?;
-
         // Second, process the removal on our end.
         group
             .mls_group
@@ -840,20 +844,13 @@ impl User {
             .merge_pending_commit(&self.crypto)
             .expect("error merging pending commit");
 
+        self.backend.publish_group_info(&group_info.into()).await?;
+
         drop(groups);
 
         self.autosave().await;
 
         Ok(())
-    }
-
-    // async fn publish_group_info(self, mls_group: &MlsGroup) -> Result<(), String> {
-
-    // }
-
-    ///
-    pub fn reset_ds_url(&mut self, ds_url: &str) {
-        self.backend.reset_ds_url(ds_url);
     }
 
     ///
@@ -866,7 +863,13 @@ impl User {
         self.autosave().await;
     }
 
-    pub async fn join_by_external_commit(
+    pub async fn join_group_externally(&mut self, group_id: &str) -> Result<(), String> {
+        let group_info = self.backend.get_group_info(group_id).await?;
+        return self.join_by_external_commit(group_info).await;
+    }
+
+    ///
+    async fn join_by_external_commit(
         &mut self,
         group_info: VerifiableGroupInfo,
     ) -> Result<(), String> {
@@ -911,9 +914,12 @@ impl User {
                 .await?;
 
             // update the group_info
-            self.backend
-                .publish_group_info(&group_info.unwrap().into())
-                .await?;
+            match group_info {
+                Some(group_info) => {
+                    self.backend.publish_group_info(&group_info.into()).await?;
+                }
+                None => {}
+            }
 
             // merge pending commit
             self.groups
@@ -936,5 +942,10 @@ impl User {
         self.autosave().await;
 
         Ok(())
+    }
+
+    ///
+    pub fn reset_ds_url(&mut self, ds_url: &str) {
+        self.backend.reset_ds_url(ds_url);
     }
 }

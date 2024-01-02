@@ -1,4 +1,4 @@
-use openmls::messages::group_info::GroupInfo;
+use openmls::messages::group_info::{GroupInfo, VerifiableGroupInfo};
 use openmls::prelude::*;
 use serde_json::from_slice;
 use sha2::{Digest, Sha256};
@@ -164,7 +164,7 @@ impl Backend {
         Ok(())
     }
 
-    pub async fn get_group_info(&self, group_id: &str) -> Result<GroupInfo, String> {
+    pub async fn get_group_info(&self, group_id: &str) -> Result<VerifiableGroupInfo, String> {
         let mut url = self.ds_url.clone();
         url.set_path("/api/group/mls_group_info/");
 

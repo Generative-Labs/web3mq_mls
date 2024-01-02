@@ -93,6 +93,12 @@ pub async fn add_member_to_group(
 }
 
 #[wasm_bindgen]
+pub async fn join_group_externally(user_id: &str, group_id: &str) -> Result<(), String> {
+    let mut user = User::load(user_id).await?;
+    return user.join_group_externally(group_id).await;
+}
+
+#[wasm_bindgen]
 pub async fn mls_encrypt_msg(user_id: &str, msg: &str, group_id: &str) -> Result<String, String> {
     let mut user = User::load(user_id).await?;
     return user.send_msg(&msg, group_id).await;
