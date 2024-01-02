@@ -732,6 +732,15 @@ impl User {
             .send_msg(&msg, &self.user_id, &group_name)
             .await?;
 
+        // publish group info
+        let group_info = group
+            .mls_group
+            .borrow()
+            .export_group_info(self.crypto.crypto(), &self.identity.borrow().signer, true)
+            .expect("Error exporting group info");
+
+        self.backend.publish_group_info(&group_info.into()).await?;
+
         // Second, process the removal on our end.
         group
             .mls_group
